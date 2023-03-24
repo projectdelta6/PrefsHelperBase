@@ -3,6 +3,10 @@ package com.duck.prefshelper
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneOffset
 import java.util.*
 
 abstract class BasePrefsHelper {
@@ -73,5 +77,41 @@ abstract class BasePrefsHelper {
 
 	fun getBoolean(key: String, defValue: Boolean): Boolean {
 		return sharedPreferences.getBoolean(key, defValue)
+	}
+
+	fun setLocalDateTime(key: String, value: LocalDateTime?) {
+		with(sharedPreferences.edit()) {
+			putLong(key, value?.toEpochSecond(ZoneOffset.UTC) ?: -1L)
+			apply()
+		}
+	}
+
+	fun getLocalDateTime(key: String): LocalDateTime? {
+		val time = sharedPreferences.getLong(key, -1L)
+		return if(time == -1L) null else LocalDateTime.ofEpochSecond(time, 0, ZoneOffset.UTC)
+	}
+
+	fun setLocalDate(key: String, value: LocalDate?) {
+		with(sharedPreferences.edit()) {
+			putLong(key, value?.toEpochDay() ?: -1L)
+			apply()
+		}
+	}
+
+	fun getLocalDate(key: String): LocalDate? {
+		val time = sharedPreferences.getLong(key, -1L)
+		return if(time == -1L) null else LocalDate.ofEpochDay(time)
+	}
+
+	fun setLocalTime(key: String, value: LocalTime?) {
+		with(sharedPreferences.edit()) {
+			putLong(key, value?.toSecondOfDay()?.toLong() ?: -1L)
+			apply()
+		}
+	}
+
+	fun getLocalTime(key: String): LocalTime? {
+		val time = sharedPreferences.getLong(key, -1L)
+		return if(time == -1L) null else LocalTime.ofSecondOfDay(time)
 	}
 }
