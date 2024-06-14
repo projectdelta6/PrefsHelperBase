@@ -9,6 +9,7 @@ group = 'com.github.projectdelta6'
 
 android {
     namespace 'com.duck.prefshelper'
+    compileSdk 34
 
     defaultConfig {
         minSdk 21
