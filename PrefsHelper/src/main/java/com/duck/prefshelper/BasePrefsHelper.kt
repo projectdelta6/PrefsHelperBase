@@ -10,7 +10,9 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneOffset
-import java.util.*
+import java.util.Date
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
 
 abstract class BasePrefsHelper {
 	protected abstract val sharedPreferences: SharedPreferences
@@ -242,13 +244,17 @@ abstract class BasePrefsHelper {
 	 * @param key The key to get the value for
 	 * @return The Enum stored under the key, or null if the key does not exist or the value is null
 	 */
-	inline fun <reified T : Enum<*>> getEnum(enumClass: Class<T>, key: String): T? {
+	@OptIn(ExperimentalContracts::class)
+	inline fun <reified T : Enum<*>> getEnum(key: String, default: T? = null): T? {
+		contract {
+			returnsNotNull() implies (default != null)
+		}
 		val value = getString(key)
-		return if (value.isBlank()) null else try {
-			enumClass.enumConstants?.firstOrNull { it.name == value }
+		return if (value.isBlank()) default else try {
+			T::class.java.enumConstants?.firstOrNull { it.name == value } ?: default
 		} catch (e: Exception) {
-			Log.w("BasePrefsHelper", "Could not get Enum of ${enumClass.simpleName} for \"$value\"", e)
-			null
+			Log.w("BasePrefsHelper", "Could not get Enum of ${T::class.simpleName} for \"$value\"", e)
+			default
 		}
 	}
 }
