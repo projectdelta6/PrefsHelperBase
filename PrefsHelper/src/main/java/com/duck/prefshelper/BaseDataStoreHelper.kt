@@ -23,8 +23,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import kotlin.contracts.ExperimentalContracts
-import kotlin.contracts.contract
 
 /**
  * Base class for DataStore
@@ -395,11 +393,34 @@ abstract class BaseDataStoreHelper(
 	 * @param default The default Enum value to return if the key does not exist or the value is invalid
 	 * @return The Enum stored under the key, or the default value
 	 */
-	@OptIn(ExperimentalContracts::class)
+	@JvmName("readEnumValueNullable")
 	inline fun <reified T : Enum<*>> readEnumValue(key: String, default: T? = null): T? {
-		contract {
-			returnsNotNull() implies (default != null)
+		return runBlocking {
+			withTimeoutOrNull(2000) {
+				`access$dataStore`.data.first()[stringPreferencesKey(key)]?.let { value ->
+					if (value.isBlank()) {
+						default
+					} else {
+						try {
+							T::class.java.enumConstants?.firstOrNull { it.name == value } ?: default
+						} catch (e: Exception) {
+							Log.w("BaseDataStoreHelper", "Could not get Enum of ${T::class.simpleName} for \"$value\"", e)
+							default
+						}
+					}
+				} ?: default
+			} ?: default
 		}
+	}
+
+	/**
+	 * Read an [Enum] preference as a blocking call.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default Enum value to return if the key does not exist or the value is invalid
+	 * @return The Enum stored under the key, or the default value
+	 */
+	inline fun <reified T : Enum<*>> readEnumValue(key: String, default: T): T {
 		return runBlocking {
 			withTimeoutOrNull(2000) {
 				`access$dataStore`.data.first()[stringPreferencesKey(key)]?.let { value ->
