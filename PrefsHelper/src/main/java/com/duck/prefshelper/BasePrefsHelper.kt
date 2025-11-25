@@ -4,7 +4,10 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.core.content.edit
+import com.duck.prefshelper.BasePrefsHelper.Companion.supervisorJob
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -13,18 +16,34 @@ import java.time.ZoneOffset
 import java.util.Date
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
+import kotlin.coroutines.CoroutineContext
 
-abstract class BasePrefsHelper {
+/**
+ * A base class for SharedPreferences helpers
+ *
+ * Provides common functionality for storing and retrieving preferences of various types
+ * including String, Int, Long, Date, Boolean, LocalDateTime, LocalDate, LocalTime, and Enum.
+ *
+ * BasePrefsHelper uses a coroutine context for background operations.
+ * By default, it uses [Dispatchers.IO] + [supervisorJob]. If you need custom job management,
+ * pass a context with your own Job or SupervisorJob. Avoid passing a new Job per instance
+ * unless you manage its lifecycle explicitly.
+ *
+ * @param coroutineContext The [CoroutineContext] to use for suspend functions, defaults to [Dispatchers.IO] with a [SupervisorJob]
+ */
+abstract class BasePrefsHelper(
+	protected val coroutineContext: CoroutineContext = Dispatchers.IO + supervisorJob
+) {
+	/**
+	 * The [SharedPreferences] instance to use
+	 */
 	protected abstract val sharedPreferences: SharedPreferences
 
 	/**
 	 * Clear all preferences
 	 */
-	open suspend fun clearPrefs(): Unit = withContext(Dispatchers.IO) {
-		with(sharedPreferences.edit()) {
-			clear()
-			commit()
-		}
+	open suspend fun clearPrefs(): Unit = withContext(coroutineContext) {
+		sharedPreferences.edit(commit = true) { clear() }
 	}
 
 	/**
@@ -41,9 +60,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setString(key: String, value: String) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putString(key, value)
-			apply()
 		}
 	}
 
@@ -64,9 +82,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setInt(key: String, value: Int) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putInt(key, value)
-			apply()
 		}
 	}
 
@@ -87,9 +104,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setLong(key: String, value: Long) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value)
-			apply()
 		}
 	}
 
@@ -110,9 +126,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setDate(key: String, value: Date?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.time ?: -1L)
-			apply()
 		}
 	}
 
@@ -134,9 +149,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setBoolean(key: String, value: Boolean) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putBoolean(key, value)
-			apply()
 		}
 	}
 
@@ -158,9 +172,8 @@ abstract class BasePrefsHelper {
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalDateTime(key: String, value: LocalDateTime?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.toEpochSecond(ZoneOffset.UTC) ?: -1L)
-			apply()
 		}
 	}
 
@@ -184,9 +197,8 @@ abstract class BasePrefsHelper {
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalDate(key: String, value: LocalDate?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.toEpochDay() ?: -1L)
-			apply()
 		}
 	}
 
@@ -210,9 +222,8 @@ abstract class BasePrefsHelper {
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalTime(key: String, value: LocalTime?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.toSecondOfDay()?.toLong() ?: -1L)
-			apply()
 		}
 	}
 
@@ -256,5 +267,9 @@ abstract class BasePrefsHelper {
 			Log.w("BasePrefsHelper", "Could not get Enum of ${T::class.simpleName} for \"$value\"", e)
 			default
 		}
+	}
+
+	companion object {
+		val supervisorJob = SupervisorJob()
 	}
 }

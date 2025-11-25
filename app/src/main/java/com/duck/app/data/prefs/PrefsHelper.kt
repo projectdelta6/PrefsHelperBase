@@ -18,7 +18,7 @@ class PrefsHelper(context: Context) {
 	var exampleDeviceValue by devicePrefs::exampleValue
 
 	var exampleDataStoreValue by normalDataStore::exampleValue
-	val exampleDataStoreValueFlow by normalDataStore::exampleValueFlow
+	val exampleDataStoreValueFlow = normalDataStore.exampleValueFlow
 
 	suspend fun clearPrefs() {
 		normalPrefs.clearPrefs()
