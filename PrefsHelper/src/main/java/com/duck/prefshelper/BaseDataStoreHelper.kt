@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.duck.prefshelper.BaseDataStoreHelper.Companion.supervisorJob
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,14 +30,25 @@ import java.time.LocalTime
 import kotlin.coroutines.CoroutineContext
 
 /**
- * Base class for DataStore
+ * Base class for DataStore helpers
  *
- * This should be implemented as a Singleton instance.
+ * Uses Preferences DataStore to store key-value pairs asynchronously.
+ * Provides generic methods to read and write various data types.
+ * Includes methods for blocking reads with timeouts.
+ *
+ * BaseDataStoreHelper uses a coroutine context for background operations.
+ * By default, it uses [Dispatchers.IO] + [supervisorJob]. If you need custom job management,
+ * pass a context with your own Job or SupervisorJob. Avoid passing a new Job per instance
+ * unless you manage its lifecycle explicitly.
+ *
+ * @param context Application context
+ * @param preferenceName Name of the preferences data store
+ * @param coroutineContext Coroutine context for async operations
  */
 abstract class BaseDataStoreHelper(
 	context: Context,
 	preferenceName: String,
-	@PublishedApi internal val coroutineContext: CoroutineContext = Dispatchers.IO + SupervisorJob()
+	@PublishedApi internal val coroutineContext: CoroutineContext = Dispatchers.IO + supervisorJob
 ) {
 	/**
 	 * DataStore instance
@@ -802,4 +814,8 @@ abstract class BaseDataStoreHelper(
 				}
 			}
 		} ?: default
+
+	companion object {
+		val supervisorJob = SupervisorJob()
+	}
 }

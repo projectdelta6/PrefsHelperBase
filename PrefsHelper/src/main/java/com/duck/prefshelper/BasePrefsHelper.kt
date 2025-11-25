@@ -5,6 +5,7 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
+import com.duck.prefshelper.BasePrefsHelper.Companion.supervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
@@ -17,8 +18,21 @@ import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 import kotlin.coroutines.CoroutineContext
 
+/**
+ * A base class for SharedPreferences helpers
+ *
+ * Provides common functionality for storing and retrieving preferences of various types
+ * including String, Int, Long, Date, Boolean, LocalDateTime, LocalDate, LocalTime, and Enum.
+ *
+ * BasePrefsHelper uses a coroutine context for background operations.
+ * By default, it uses [Dispatchers.IO] + [supervisorJob]. If you need custom job management,
+ * pass a context with your own Job or SupervisorJob. Avoid passing a new Job per instance
+ * unless you manage its lifecycle explicitly.
+ *
+ * @param coroutineContext The [CoroutineContext] to use for suspend functions, defaults to [Dispatchers.IO] with a [SupervisorJob]
+ */
 abstract class BasePrefsHelper(
-	protected val coroutineContext: CoroutineContext = Dispatchers.IO + SupervisorJob()
+	protected val coroutineContext: CoroutineContext = Dispatchers.IO + supervisorJob
 ) {
 	/**
 	 * The [SharedPreferences] instance to use
@@ -70,7 +84,6 @@ abstract class BasePrefsHelper(
 	fun setInt(key: String, value: Int) {
 		sharedPreferences.edit {
 			putInt(key, value)
-
 		}
 	}
 
@@ -254,5 +267,9 @@ abstract class BasePrefsHelper(
 			Log.w("BasePrefsHelper", "Could not get Enum of ${T::class.simpleName} for \"$value\"", e)
 			default
 		}
+	}
+
+	companion object {
+		val supervisorJob = SupervisorJob()
 	}
 }
