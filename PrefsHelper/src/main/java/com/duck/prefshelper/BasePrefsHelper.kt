@@ -48,7 +48,6 @@ abstract class BasePrefsHelper(
 	fun setString(key: String, value: String) {
 		sharedPreferences.edit {
 			putString(key, value)
-
 		}
 	}
 
