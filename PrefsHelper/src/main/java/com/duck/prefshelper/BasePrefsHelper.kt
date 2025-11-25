@@ -4,7 +4,9 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.core.content.edit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -13,18 +15,21 @@ import java.time.ZoneOffset
 import java.util.Date
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
+import kotlin.coroutines.CoroutineContext
 
-abstract class BasePrefsHelper {
+abstract class BasePrefsHelper(
+	protected val coroutineContext: CoroutineContext = Dispatchers.IO + SupervisorJob()
+) {
+	/**
+	 * The [SharedPreferences] instance to use
+	 */
 	protected abstract val sharedPreferences: SharedPreferences
 
 	/**
 	 * Clear all preferences
 	 */
-	open suspend fun clearPrefs(): Unit = withContext(Dispatchers.IO) {
-		with(sharedPreferences.edit()) {
-			clear()
-			commit()
-		}
+	open suspend fun clearPrefs(): Unit = withContext(coroutineContext) {
+		sharedPreferences.edit(commit = true) { clear() }
 	}
 
 	/**
@@ -41,9 +46,9 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setString(key: String, value: String) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putString(key, value)
-			apply()
+
 		}
 	}
 
@@ -64,9 +69,9 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setInt(key: String, value: Int) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putInt(key, value)
-			apply()
+
 		}
 	}
 
@@ -87,9 +92,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setLong(key: String, value: Long) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value)
-			apply()
 		}
 	}
 
@@ -110,9 +114,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setDate(key: String, value: Date?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.time ?: -1L)
-			apply()
 		}
 	}
 
@@ -134,9 +137,8 @@ abstract class BasePrefsHelper {
 	 * @param value The value to store
 	 */
 	fun setBoolean(key: String, value: Boolean) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putBoolean(key, value)
-			apply()
 		}
 	}
 
@@ -158,9 +160,8 @@ abstract class BasePrefsHelper {
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalDateTime(key: String, value: LocalDateTime?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.toEpochSecond(ZoneOffset.UTC) ?: -1L)
-			apply()
 		}
 	}
 
@@ -184,9 +185,8 @@ abstract class BasePrefsHelper {
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalDate(key: String, value: LocalDate?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.toEpochDay() ?: -1L)
-			apply()
 		}
 	}
 
@@ -210,9 +210,8 @@ abstract class BasePrefsHelper {
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalTime(key: String, value: LocalTime?) {
-		with(sharedPreferences.edit()) {
+		sharedPreferences.edit {
 			putLong(key, value?.toSecondOfDay()?.toLong() ?: -1L)
-			apply()
 		}
 	}
 

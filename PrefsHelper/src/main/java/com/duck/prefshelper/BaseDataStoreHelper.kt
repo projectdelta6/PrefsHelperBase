@@ -38,11 +38,19 @@ abstract class BaseDataStoreHelper(
 	preferenceName: String,
 	protected val coroutineContext: CoroutineContext = Dispatchers.IO + SupervisorJob()
 ) {
-	//Instance of DataStore
+	/**
+	 * DataStore instance
+	 */
 	private val Context.dataStoreInstance: DataStore<Preferences> by preferencesDataStore(name = preferenceName)
 
+	/**
+	 * DataStore reference
+	 */
 	protected val dataStore: DataStore<Preferences> = context.dataStoreInstance
 
+	/**
+	 * Coroutine scope for async operations
+	 */
 	protected val scope = CoroutineScope(coroutineContext)
 
 	//Todo: remove Deprecated methods in future release
