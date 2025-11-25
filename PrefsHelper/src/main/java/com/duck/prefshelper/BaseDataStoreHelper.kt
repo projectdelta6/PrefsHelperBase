@@ -36,7 +36,7 @@ import kotlin.coroutines.CoroutineContext
 abstract class BaseDataStoreHelper(
 	context: Context,
 	preferenceName: String,
-	protected val coroutineContext: CoroutineContext = Dispatchers.IO + SupervisorJob()
+	@PublishedApi internal val coroutineContext: CoroutineContext = Dispatchers.IO + SupervisorJob()
 ) {
 	/**
 	 * DataStore instance
@@ -45,8 +45,12 @@ abstract class BaseDataStoreHelper(
 
 	/**
 	 * DataStore reference
+	 *
+	 * Internal visibility allows testing while keeping it hidden from library consumers.
+	 * This is accessed by inline functions which require it to be internal or public.
 	 */
-	protected val dataStore: DataStore<Preferences> = context.dataStoreInstance
+	@PublishedApi
+	internal val dataStore: DataStore<Preferences> = context.dataStoreInstance
 
 	/**
 	 * Coroutine scope for async operations

@@ -1,10 +1,12 @@
 [versions]
 compileSdk = "36"
+mockitoKotlin = "6.1.0"
 targetSdk = "36"
 gradle = "8.13.1"
 kotlin = "2.2.21"
 dokka = "2.1.0"
 dataStore = "1.2.0"
+mockitoCore = "5.20.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.17.0" }
@@ -26,6 +28,9 @@ junit = { module = "junit:junit", version = "4.13.2" }
 androidx-dataStore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "dataStore" }
 
 android-documentation-plugin = { module = "org.jetbrains.dokka:android-documentation-plugin", version.ref = "dokka" }
+
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockitoCore" }
+mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "mockitoKotlin" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "gradle" }

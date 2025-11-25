@@ -56,6 +56,8 @@ dependencies {
 	implementation(project(":PrefsHelper"))
 
 	testImplementation(libs.junit)
+	testImplementation(libs.mockito.core)
+	testImplementation(libs.mockito.kotlin)
 	androidTestImplementation(libs.androidx.test.ext.junit)
 	androidTestImplementation(libs.androidx.test.espresso.core)
 	androidTestImplementation(platform(libs.androidx.compose.bom))
