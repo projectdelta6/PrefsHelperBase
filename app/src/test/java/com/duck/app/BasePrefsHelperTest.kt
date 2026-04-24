@@ -338,6 +338,72 @@ class BasePrefsHelperTest {
 		verify(mockEditor).putBoolean("key3", true)
 	}
 
+	// Property delegate tests
+	@Test
+	fun testStringPrefDelegateGet() {
+		`when`(mockSharedPreferences.getString("string_key", "fallback")).thenReturn("stored")
+		assertEquals("stored", prefsHelper.stringValue)
+	}
+
+	@Test
+	fun testStringPrefDelegateSet() {
+		prefsHelper.stringValue = "new-value"
+		verify(mockEditor).putString("string_key", "new-value")
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testIntPrefDelegateGet() {
+		`when`(mockSharedPreferences.getInt("int_key", 10)).thenReturn(77)
+		assertEquals(77, prefsHelper.intValue)
+	}
+
+	@Test
+	fun testIntPrefDelegateSet() {
+		prefsHelper.intValue = 99
+		verify(mockEditor).putInt("int_key", 99)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testNullableIntPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("maybe_int")).thenReturn(false)
+		assertNull(prefsHelper.maybeInt)
+	}
+
+	@Test
+	fun testNullableIntPrefReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.contains("maybe_int")).thenReturn(true)
+		`when`(mockSharedPreferences.getInt("maybe_int", 0)).thenReturn(123)
+		assertEquals(123, prefsHelper.maybeInt)
+	}
+
+	@Test
+	fun testNullableIntPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.maybeInt = null
+		verify(mockEditor).remove("maybe_int")
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testEnumPrefDelegateGet() {
+		`when`(mockSharedPreferences.getString("enum_key", "")).thenReturn("VALUE_B")
+		assertEquals(TestEnum.VALUE_B, prefsHelper.enumValue)
+	}
+
+	@Test
+	fun testEnumPrefDelegateGetFallsBackToDefault() {
+		`when`(mockSharedPreferences.getString("enum_key", "")).thenReturn("")
+		assertEquals(TestEnum.VALUE_A, prefsHelper.enumValue)
+	}
+
+	@Test
+	fun testEnumPrefDelegateSet() {
+		prefsHelper.enumValue = TestEnum.VALUE_C
+		verify(mockEditor).putString("enum_key", "VALUE_C")
+		verify(mockEditor).apply()
+	}
+
 	enum class TestEnum {
 		VALUE_A, VALUE_B, VALUE_C
 	}
@@ -345,5 +411,10 @@ class BasePrefsHelperTest {
 	private inner class TestPrefsHelper : BasePrefsHelper() {
 		override val sharedPreferences: SharedPreferences
 			get() = mockSharedPreferences
+
+		var stringValue by stringPref("string_key", defaultValue = "fallback")
+		var intValue by intPref("int_key", defaultValue = 10)
+		var maybeInt by intPref("maybe_int")
+		var enumValue by enumPref("enum_key", TestEnum.VALUE_A)
 	}
 }

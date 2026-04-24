@@ -17,6 +17,8 @@ import java.util.Date
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 import kotlin.coroutines.CoroutineContext
+import kotlin.properties.ReadWriteProperty
+import kotlin.reflect.KProperty
 
 /**
  * A base class for SharedPreferences helpers
@@ -266,6 +268,192 @@ abstract class BasePrefsHelper(
 		} catch (e: Exception) {
 			Log.w("BasePrefsHelper", "Could not get Enum of ${T::class.simpleName} for \"$value\"", e)
 			default
+		}
+	}
+
+	/**
+	 * Create a property delegate for a [String] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun stringPref(key: String, defaultValue: String): ReadWriteProperty<Any?, String> =
+		object : ReadWriteProperty<Any?, String> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): String = getString(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: String) = setString(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [String] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun stringPref(key: String): ReadWriteProperty<Any?, String?> =
+		object : ReadWriteProperty<Any?, String?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): String? =
+				if (contains(key)) sharedPreferences.getString(key, null) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: String?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setString(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for an [Int] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun intPref(key: String, defaultValue: Int): ReadWriteProperty<Any?, Int> =
+		object : ReadWriteProperty<Any?, Int> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Int = getInt(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int) = setInt(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Int] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun intPref(key: String): ReadWriteProperty<Any?, Int?> =
+		object : ReadWriteProperty<Any?, Int?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Int? =
+				if (contains(key)) getInt(key) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Int?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setInt(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a [Long] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun longPref(key: String, defaultValue: Long): ReadWriteProperty<Any?, Long> =
+		object : ReadWriteProperty<Any?, Long> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Long = getLong(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Long) = setLong(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Long] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun longPref(key: String): ReadWriteProperty<Any?, Long?> =
+		object : ReadWriteProperty<Any?, Long?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Long? =
+				if (contains(key)) getLong(key) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Long?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setLong(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a [Boolean] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun booleanPref(key: String, defaultValue: Boolean): ReadWriteProperty<Any?, Boolean> =
+		object : ReadWriteProperty<Any?, Boolean> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Boolean = getBoolean(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Boolean) = setBoolean(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Boolean] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun booleanPref(key: String): ReadWriteProperty<Any?, Boolean?> =
+		object : ReadWriteProperty<Any?, Boolean?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Boolean? =
+				if (contains(key)) getBoolean(key, false) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Boolean?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setBoolean(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Date] preference.
+	 *
+	 * Assigning null stores the -1L sentinel (matching [setDate]/[getDate]).
+	 */
+	protected fun datePref(key: String): ReadWriteProperty<Any?, Date?> =
+		object : ReadWriteProperty<Any?, Date?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Date? = getDate(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Date?) = setDate(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [LocalDateTime] preference.
+	 *
+	 * Assigning null stores the -1L sentinel (matching [setLocalDateTime]/[getLocalDateTime]).
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun localDateTimePref(key: String): ReadWriteProperty<Any?, LocalDateTime?> =
+		object : ReadWriteProperty<Any?, LocalDateTime?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): LocalDateTime? = getLocalDateTime(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: LocalDateTime?) = setLocalDateTime(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [LocalDate] preference.
+	 *
+	 * Assigning null stores the -1L sentinel (matching [setLocalDate]/[getLocalDate]).
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun localDatePref(key: String): ReadWriteProperty<Any?, LocalDate?> =
+		object : ReadWriteProperty<Any?, LocalDate?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): LocalDate? = getLocalDate(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: LocalDate?) = setLocalDate(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [LocalTime] preference.
+	 *
+	 * Assigning null stores the -1L sentinel (matching [setLocalTime]/[getLocalTime]).
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun localTimePref(key: String): ReadWriteProperty<Any?, LocalTime?> =
+		object : ReadWriteProperty<Any?, LocalTime?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): LocalTime? = getLocalTime(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: LocalTime?) = setLocalTime(key, value)
+		}
+
+	/**
+	 * Create a property delegate for an [Enum] preference with a non-null default.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param default Value returned if the key is absent or cannot be parsed
+	 */
+	protected inline fun <reified T : Enum<*>> enumPref(key: String, default: T): ReadWriteProperty<Any?, T> {
+		val constants = T::class.java.enumConstants
+		return object : ReadWriteProperty<Any?, T> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): T {
+				val value = getString(key)
+				return if (value.isBlank()) default
+				else constants?.firstOrNull { it.name == value } ?: default
+			}
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: T) = setEnum(key, value)
+		}
+	}
+
+	/**
+	 * Create a property delegate for a nullable [Enum] preference.
+	 *
+	 * Returns null when the key is absent or cannot be parsed. Assigning null clears the stored value.
+	 */
+	protected inline fun <reified T : Enum<*>> enumPref(key: String): ReadWriteProperty<Any?, T?> {
+		val constants = T::class.java.enumConstants
+		return object : ReadWriteProperty<Any?, T?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): T? {
+				val value = getString(key)
+				return if (value.isBlank()) null
+				else constants?.firstOrNull { it.name == value }
+			}
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: T?) = setEnum(key, value)
 		}
 	}
 
