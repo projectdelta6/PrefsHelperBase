@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
 	alias(libs.plugins.android.library)
 	alias(libs.plugins.dokka)
+	`maven-publish`
 }
 
 group = "com.github.projectdelta6"
@@ -32,6 +33,23 @@ android {
 	kotlin {
 		compilerOptions {
 			jvmTarget.set(JvmTarget.JVM_11)
+		}
+	}
+
+	publishing {
+		singleVariant("release") {
+			withSourcesJar()
+			withJavadocJar()
+		}
+	}
+}
+
+afterEvaluate {
+	publishing {
+		publications {
+			register<MavenPublication>("release") {
+				from(components["release"])
+			}
 		}
 	}
 }
