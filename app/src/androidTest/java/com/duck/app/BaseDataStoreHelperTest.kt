@@ -494,6 +494,57 @@ class BaseDataStoreHelperTest {
 		assertEquals(TestEnum.VALUE_A, value)
 	}
 
+	// Property delegate tests
+	@Test
+	fun testIntPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(-1, dataStoreHelper.delegateInt)
+	}
+
+	@Test
+	fun testIntPrefDelegateRoundTripsValue() = runBlocking {
+		dataStoreHelper.delegateInt = 42
+		delay(100)
+		assertEquals(42, dataStoreHelper.delegateInt)
+	}
+
+	@Test
+	fun testNullableIntPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableInt)
+	}
+
+	@Test
+	fun testNullableIntPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableInt = 7
+		delay(100)
+		assertEquals(7, dataStoreHelper.delegateNullableInt)
+
+		dataStoreHelper.delegateNullableInt = null
+		delay(100)
+		assertNull(dataStoreHelper.delegateNullableInt)
+	}
+
+	@Test
+	fun testIntPrefFlowEmitsDelegateWrites() = runBlocking {
+		dataStoreHelper.delegateInt = 5
+		delay(100)
+		assertEquals(5, dataStoreHelper.delegateIntFlow.first())
+	}
+
+	@Test
+	fun testEnumPrefDelegateRoundTrip() = runBlocking {
+		dataStoreHelper.delegateEnum = TestEnum.VALUE_C
+		delay(100)
+		assertEquals(TestEnum.VALUE_C, dataStoreHelper.delegateEnum)
+	}
+
+	@Test
+	fun testEnumPrefDelegateFallsBackToDefault() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(TestEnum.VALUE_A, dataStoreHelper.delegateEnum)
+	}
+
 	enum class TestEnum {
 		VALUE_A, VALUE_B, VALUE_C
 	}
@@ -609,8 +660,17 @@ class BaseDataStoreHelperTest {
 				writeEnumAsync(KEY_TEST_ENUM, value)
 			}
 
+		// Delegate-backed properties under test
+		var delegateInt by intPref(KEY_DELEGATE_INT, defaultValue = -1)
+		var delegateNullableInt by intPref(KEY_DELEGATE_NULLABLE_INT)
+		val delegateIntFlow = intPrefFlow(KEY_DELEGATE_INT, defaultValue = -1)
+		var delegateEnum by enumPref(KEY_DELEGATE_ENUM, default = TestEnum.VALUE_A)
+
 		companion object {
 			private const val KEY_TEST_ENUM = "test_enum_key"
+			private const val KEY_DELEGATE_INT = "delegate_int_key"
+			private const val KEY_DELEGATE_NULLABLE_INT = "delegate_nullable_int_key"
+			private const val KEY_DELEGATE_ENUM = "delegate_enum_key"
 		}
 
 		suspend fun testClearPrefs() = clearPrefs()
