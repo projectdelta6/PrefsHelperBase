@@ -715,6 +715,73 @@ class BaseDataStoreHelperTest {
 		assertEquals(true, dataStoreHelper.delegateBooleanFlow.first())
 	}
 
+	// Nullable Long delegate
+	@Test
+	fun testNullableLongPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableLong)
+	}
+
+	@Test
+	fun testNullableLongPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableLong = 99L
+		assertEquals(99L, awaitValue(predicate = { it == 99L }) { dataStoreHelper.delegateNullableLong })
+
+		dataStoreHelper.delegateNullableLong = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableLong })
+	}
+
+	// Nullable Double delegate
+	@Test
+	fun testNullableDoublePrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableDouble)
+	}
+
+	@Test
+	fun testNullableDoublePrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableDouble = 1.5
+		assertEquals(1.5, awaitValue(predicate = { it == 1.5 }) { dataStoreHelper.delegateNullableDouble } ?: 0.0, 0.00001)
+
+		dataStoreHelper.delegateNullableDouble = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableDouble })
+	}
+
+	// Nullable Boolean delegate
+	@Test
+	fun testNullableBooleanPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableBoolean)
+	}
+
+	@Test
+	fun testNullableBooleanPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableBoolean = true
+		assertEquals(true, awaitValue(predicate = { it == true }) { dataStoreHelper.delegateNullableBoolean })
+
+		dataStoreHelper.delegateNullableBoolean = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableBoolean })
+	}
+
+	// Nullable Enum delegate
+	@Test
+	fun testNullableEnumPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableEnum)
+	}
+
+	@Test
+	fun testNullableEnumPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableEnum = TestEnum.VALUE_B
+		assertEquals(
+			TestEnum.VALUE_B,
+			awaitValue(predicate = { it == TestEnum.VALUE_B }) { dataStoreHelper.delegateNullableEnum },
+		)
+
+		dataStoreHelper.delegateNullableEnum = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableEnum })
+	}
+
 	// LocalDateTime delegate
 	@Test
 	fun testLocalDateTimePrefDelegateRoundTripsValue() = runBlocking {
@@ -898,13 +965,18 @@ class BaseDataStoreHelperTest {
 		val delegateStringFlow = stringPrefFlow(KEY_DELEGATE_STRING, defaultValue = "fallback")
 
 		var delegateLong by longPref(KEY_DELEGATE_LONG, defaultValue = -1L)
+		var delegateNullableLong by longPref(KEY_DELEGATE_NULLABLE_LONG)
 		val delegateLongFlow = longPrefFlow(KEY_DELEGATE_LONG, defaultValue = -1L)
 
 		var delegateDouble by doublePref(KEY_DELEGATE_DOUBLE, defaultValue = -1.0)
+		var delegateNullableDouble by doublePref(KEY_DELEGATE_NULLABLE_DOUBLE)
 		val delegateDoubleFlow = doublePrefFlow(KEY_DELEGATE_DOUBLE, defaultValue = -1.0)
 
 		var delegateBoolean by booleanPref(KEY_DELEGATE_BOOLEAN, defaultValue = false)
+		var delegateNullableBoolean by booleanPref(KEY_DELEGATE_NULLABLE_BOOLEAN)
 		val delegateBooleanFlow = booleanPrefFlow(KEY_DELEGATE_BOOLEAN, defaultValue = false)
+
+		var delegateNullableEnum by enumPref<TestEnum>(KEY_DELEGATE_NULLABLE_ENUM)
 
 		var delegateLocalDateTime by localDateTimePref(KEY_DELEGATE_LDT)
 		var delegateLocalDate by localDatePref(KEY_DELEGATE_LD)
@@ -918,8 +990,12 @@ class BaseDataStoreHelperTest {
 			private const val KEY_DELEGATE_STRING = "delegate_string_key"
 			private const val KEY_DELEGATE_NULLABLE_STRING = "delegate_nullable_string_key"
 			private const val KEY_DELEGATE_LONG = "delegate_long_key"
+			private const val KEY_DELEGATE_NULLABLE_LONG = "delegate_nullable_long_key"
 			private const val KEY_DELEGATE_DOUBLE = "delegate_double_key"
+			private const val KEY_DELEGATE_NULLABLE_DOUBLE = "delegate_nullable_double_key"
 			private const val KEY_DELEGATE_BOOLEAN = "delegate_boolean_key"
+			private const val KEY_DELEGATE_NULLABLE_BOOLEAN = "delegate_nullable_boolean_key"
+			private const val KEY_DELEGATE_NULLABLE_ENUM = "delegate_nullable_enum_key"
 			private const val KEY_DELEGATE_LDT = "delegate_ldt_key"
 			private const val KEY_DELEGATE_LD = "delegate_ld_key"
 			private const val KEY_DELEGATE_LT = "delegate_lt_key"
