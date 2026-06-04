@@ -22,11 +22,6 @@ configure<ApplicationExtension> {
 	}
 
 	buildTypes {
-		debug {
-			// Lets Kover pick up coverage from the instrumented BaseDataStoreHelperTest
-			// (requires a connected device/emulator when running koverHtmlReport).
-			enableAndroidTestCoverage = true
-		}
 		release {
 			isMinifyEnabled = false
 			proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -41,6 +36,14 @@ configure<ApplicationExtension> {
 	buildFeatures {
 		compose = true
 	}
+
+	testOptions {
+		unitTests {
+			// Required for Robolectric: BaseDataStoreHelperTest runs on the JVM and
+			// needs the merged manifest + resources on the unit-test classpath.
+			isIncludeAndroidResources = true
+		}
+	}
 }
 
 kotlin {
@@ -51,17 +54,21 @@ kotlin {
 
 kover {
 	reports {
+		// Coverage gate: `./gradlew :app:koverVerifyDebug` fails below this floor.
+		// Aggregated line coverage across com.duck.prefshelper.* (both helpers, now
+		// all JVM-tested via Robolectric). Set below current to catch regressions
+		// without tripping on minor refactors; raise as coverage improves.
+		verify {
+			rule {
+				minBound(70)
+			}
+		}
 		filters {
-			excludes {
-				// The sample app's UI scaffolding isn't the library under test —
-				// keep the coverage number focused on com.duck.prefshelper.*
-				classes(
-					"*.R", "*.R\$*", "*.BuildConfig",
-					"com.duck.app.ui.*",
-					"com.duck.app.MainActivity*",
-					"com.duck.app.ComposableSingletons*",
-				)
-				annotatedBy("androidx.compose.runtime.Composable")
+			includes {
+				// Measure only the published library. The sample app (incl. the
+				// consumer com.duck.app.data.prefs.* classes, which the tests don't
+				// instantiate) is scaffolding, not the code under test.
+				classes("com.duck.prefshelper.*")
 			}
 		}
 	}
@@ -84,13 +91,14 @@ dependencies {
 	// since the tests that exercise PrefsHelper live here in :app.
 	kover(project(":PrefsHelper"))
 
+	// Unit tests run on the JVM. BaseDataStoreHelperTest runs under Robolectric via the
+	// AndroidJUnit4 delegating runner, so DataStore coverage is visible to Kover (which
+	// cannot instrument on-device tests). No emulator required.
 	testImplementation(libs.junit)
 	testImplementation(libs.mockito.core)
 	testImplementation(libs.mockito.kotlin)
-	androidTestImplementation(libs.androidx.test.ext.junit)
-	androidTestImplementation(libs.androidx.test.espresso.core)
-	androidTestImplementation(platform(libs.androidx.compose.bom))
-	androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+	testImplementation(libs.androidx.test.ext.junit)
+	testImplementation(libs.robolectric)
+
 	debugImplementation(libs.androidx.compose.ui.tooling)
-	debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

@@ -11,9 +11,7 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -549,8 +547,8 @@ class BaseDataStoreHelperTest {
 	fun testReadEnumFlow() = runBlocking {
 		// Test Flow-based enum reading via property
 		dataStoreHelper.testEnumProperty = TestEnum.VALUE_C
-		val value = withTimeout(5.seconds) { dataStoreHelper.testEnumPropertyFlow.first { it == TestEnum.VALUE_C } }
-		assertEquals(TestEnum.VALUE_C, value)
+		awaitValue(predicate = { it == TestEnum.VALUE_C }) { dataStoreHelper.testEnumProperty }
+		assertEquals(TestEnum.VALUE_C, dataStoreHelper.testEnumPropertyFlow.first())
 	}
 
 	@Test
@@ -601,8 +599,8 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testIntPrefFlowEmitsDelegateWrites() = runBlocking {
 		dataStoreHelper.delegateInt = 5
-		val value = withTimeout(5.seconds) { dataStoreHelper.delegateIntFlow.first { it == 5 } }
-		assertEquals(5, value)
+		awaitValue(predicate = { it == 5 }) { dataStoreHelper.delegateInt }
+		assertEquals(5, dataStoreHelper.delegateIntFlow.first())
 	}
 
 	@Test
@@ -650,8 +648,8 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testStringPrefFlowEmitsDelegateWrites() = runBlocking {
 		dataStoreHelper.delegateString = "flowed"
-		val value = withTimeout(5.seconds) { dataStoreHelper.delegateStringFlow.first { it == "flowed" } }
-		assertEquals("flowed", value)
+		awaitValue(predicate = { it == "flowed" }) { dataStoreHelper.delegateString }
+		assertEquals("flowed", dataStoreHelper.delegateStringFlow.first())
 	}
 
 	// Long delegate
@@ -671,8 +669,8 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testLongPrefFlowEmitsDelegateWrites() = runBlocking {
 		dataStoreHelper.delegateLong = 42L
-		val value = withTimeout(5.seconds) { dataStoreHelper.delegateLongFlow.first { it == 42L } }
-		assertEquals(42L, value)
+		awaitValue(predicate = { it == 42L }) { dataStoreHelper.delegateLong }
+		assertEquals(42L, dataStoreHelper.delegateLongFlow.first())
 	}
 
 	// Double delegate
@@ -692,8 +690,8 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testDoublePrefFlowEmitsDelegateWrites() = runBlocking {
 		dataStoreHelper.delegateDouble = 2.71828
-		val value = withTimeout(5.seconds) { dataStoreHelper.delegateDoubleFlow.first { it == 2.71828 } }
-		assertEquals(2.71828, value, 0.00001)
+		awaitValue(predicate = { it == 2.71828 }) { dataStoreHelper.delegateDouble }
+		assertEquals(2.71828, dataStoreHelper.delegateDoubleFlow.first(), 0.00001)
 	}
 
 	// Boolean delegate
@@ -713,8 +711,8 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testBooleanPrefFlowEmitsDelegateWrites() = runBlocking {
 		dataStoreHelper.delegateBoolean = true
-		val value = withTimeout(5.seconds) { dataStoreHelper.delegateBooleanFlow.first { it } }
-		assertEquals(true, value)
+		awaitValue(predicate = { it }) { dataStoreHelper.delegateBoolean }
+		assertEquals(true, dataStoreHelper.delegateBooleanFlow.first())
 	}
 
 	// LocalDateTime delegate
