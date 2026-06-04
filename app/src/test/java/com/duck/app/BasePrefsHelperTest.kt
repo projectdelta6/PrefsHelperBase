@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import com.duck.prefshelper.BasePrefsHelper
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -404,6 +405,190 @@ class BasePrefsHelperTest {
 		verify(mockEditor).apply()
 	}
 
+	// Nullable String delegate
+	@Test
+	fun testNullableStringPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_string_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableString)
+	}
+
+	@Test
+	fun testNullableStringPrefReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.contains("nullable_string_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getString("nullable_string_key", null)).thenReturn("stored")
+		assertEquals("stored", prefsHelper.nullableString)
+	}
+
+	@Test
+	fun testNullableStringPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableString = null
+		verify(mockEditor).remove("nullable_string_key")
+		verify(mockEditor).apply()
+	}
+
+	// Long delegate
+	@Test
+	fun testLongPrefDelegateGet() {
+		`when`(mockSharedPreferences.getLong("long_key", 5L)).thenReturn(999L)
+		assertEquals(999L, prefsHelper.longValue)
+	}
+
+	@Test
+	fun testLongPrefDelegateSet() {
+		prefsHelper.longValue = 4242L
+		verify(mockEditor).putLong("long_key", 4242L)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testNullableLongPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_long_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableLong)
+	}
+
+	@Test
+	fun testNullableLongPrefReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.contains("nullable_long_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("nullable_long_key", 0L)).thenReturn(55L)
+		assertEquals(55L, prefsHelper.nullableLong)
+	}
+
+	@Test
+	fun testNullableLongPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableLong = null
+		verify(mockEditor).remove("nullable_long_key")
+		verify(mockEditor).apply()
+	}
+
+	// Boolean delegate
+	@Test
+	fun testBooleanPrefDelegateGet() {
+		`when`(mockSharedPreferences.getBoolean("bool_key", true)).thenReturn(false)
+		assertFalse(prefsHelper.boolValue)
+	}
+
+	@Test
+	fun testBooleanPrefDelegateSet() {
+		prefsHelper.boolValue = false
+		verify(mockEditor).putBoolean("bool_key", false)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testNullableBooleanPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_bool_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableBool)
+	}
+
+	@Test
+	fun testNullableBooleanPrefReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.contains("nullable_bool_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getBoolean("nullable_bool_key", false)).thenReturn(true)
+		assertEquals(true, prefsHelper.nullableBool)
+	}
+
+	@Test
+	fun testNullableBooleanPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableBool = null
+		verify(mockEditor).remove("nullable_bool_key")
+		verify(mockEditor).apply()
+	}
+
+	// Date delegate
+	@Test
+	fun testDatePrefDelegateGet() {
+		`when`(mockSharedPreferences.getLong("date_delegate_key", -1L)).thenReturn(1234567890000L)
+		assertEquals(Date(1234567890000L), prefsHelper.dateValue)
+	}
+
+	@Test
+	fun testDatePrefDelegateSet() {
+		prefsHelper.dateValue = Date(1234567890000L)
+		verify(mockEditor).putLong("date_delegate_key", 1234567890000L)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testDatePrefDelegateReturnsNullWhenNotSet() {
+		`when`(mockSharedPreferences.getLong("date_delegate_key", -1L)).thenReturn(-1L)
+		assertNull(prefsHelper.dateValue)
+	}
+
+	// LocalDateTime delegate
+	@Test
+	fun testLocalDateTimePrefDelegateGet() {
+		val dateTime = LocalDateTime.of(2023, 11, 25, 10, 30, 45)
+		`when`(mockSharedPreferences.getLong("ldt_delegate_key", -1L))
+			.thenReturn(dateTime.toEpochSecond(ZoneOffset.UTC))
+		assertEquals(dateTime, prefsHelper.localDateTimeValue)
+	}
+
+	@Test
+	fun testLocalDateTimePrefDelegateSet() {
+		val dateTime = LocalDateTime.of(2023, 11, 25, 10, 30, 45)
+		prefsHelper.localDateTimeValue = dateTime
+		verify(mockEditor).putLong("ldt_delegate_key", dateTime.toEpochSecond(ZoneOffset.UTC))
+		verify(mockEditor).apply()
+	}
+
+	// LocalDate delegate
+	@Test
+	fun testLocalDatePrefDelegateGet() {
+		val date = LocalDate.of(2023, 11, 25)
+		`when`(mockSharedPreferences.getLong("ld_delegate_key", -1L)).thenReturn(date.toEpochDay())
+		assertEquals(date, prefsHelper.localDateValue)
+	}
+
+	@Test
+	fun testLocalDatePrefDelegateSet() {
+		val date = LocalDate.of(2023, 11, 25)
+		prefsHelper.localDateValue = date
+		verify(mockEditor).putLong("ld_delegate_key", date.toEpochDay())
+		verify(mockEditor).apply()
+	}
+
+	// LocalTime delegate
+	@Test
+	fun testLocalTimePrefDelegateGet() {
+		val time = LocalTime.of(14, 30, 45)
+		`when`(mockSharedPreferences.getLong("lt_delegate_key", -1L)).thenReturn(time.toSecondOfDay().toLong())
+		assertEquals(time, prefsHelper.localTimeValue)
+	}
+
+	@Test
+	fun testLocalTimePrefDelegateSet() {
+		val time = LocalTime.of(14, 30, 45)
+		prefsHelper.localTimeValue = time
+		verify(mockEditor).putLong("lt_delegate_key", time.toSecondOfDay().toLong())
+		verify(mockEditor).apply()
+	}
+
+	// Nullable Enum delegate
+	@Test
+	fun testNullableEnumPrefDelegateReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.getString("nullable_enum_key", "")).thenReturn("")
+		assertNull(prefsHelper.nullableEnumValue)
+	}
+
+	@Test
+	fun testNullableEnumPrefDelegateReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.getString("nullable_enum_key", "")).thenReturn("VALUE_B")
+		assertEquals(TestEnum.VALUE_B, prefsHelper.nullableEnumValue)
+	}
+
+	@Test
+	fun testNullableEnumPrefDelegateReturnsNullForInvalidValue() {
+		`when`(mockSharedPreferences.getString("nullable_enum_key", "")).thenReturn("NOT_A_VALUE")
+		assertNull(prefsHelper.nullableEnumValue)
+	}
+
+	@Test
+	fun testNullableEnumPrefDelegateSetNull() {
+		prefsHelper.nullableEnumValue = null
+		verify(mockEditor).putString("nullable_enum_key", "")
+		verify(mockEditor).apply()
+	}
+
 	enum class TestEnum {
 		VALUE_A, VALUE_B, VALUE_C
 	}
@@ -413,8 +598,18 @@ class BasePrefsHelperTest {
 			get() = mockSharedPreferences
 
 		var stringValue by stringPref("string_key", defaultValue = "fallback")
+		var nullableString by stringPref("nullable_string_key")
 		var intValue by intPref("int_key", defaultValue = 10)
 		var maybeInt by intPref("maybe_int")
+		var longValue by longPref("long_key", defaultValue = 5L)
+		var nullableLong by longPref("nullable_long_key")
+		var boolValue by booleanPref("bool_key", defaultValue = true)
+		var nullableBool by booleanPref("nullable_bool_key")
+		var dateValue by datePref("date_delegate_key")
+		var localDateTimeValue by localDateTimePref("ldt_delegate_key")
+		var localDateValue by localDatePref("ld_delegate_key")
+		var localTimeValue by localTimePref("lt_delegate_key")
 		var enumValue by enumPref("enum_key", TestEnum.VALUE_A)
+		var nullableEnumValue by enumPref<TestEnum>("nullable_enum_key")
 	}
 }

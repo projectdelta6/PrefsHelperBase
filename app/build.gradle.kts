@@ -1,11 +1,13 @@
+import com.android.build.api.dsl.ApplicationExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
 	alias(libs.plugins.android.application)
 	alias(libs.plugins.kotlin.compose)
+	alias(libs.plugins.kover)
 }
 
-android {
+configure<ApplicationExtension> {
 	namespace = "com.duck.app"
 	compileSdk = libs.versions.compileSdk.get().toInt()
 
@@ -20,6 +22,11 @@ android {
 	}
 
 	buildTypes {
+		debug {
+			// Lets Kover pick up coverage from the instrumented BaseDataStoreHelperTest
+			// (requires a connected device/emulator when running koverHtmlReport).
+			enableAndroidTestCoverage = true
+		}
 		release {
 			isMinifyEnabled = false
 			proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -30,14 +37,33 @@ android {
 		sourceCompatibility = JavaVersion.VERSION_11
 		targetCompatibility = JavaVersion.VERSION_11
 	}
-	kotlin {
-		compilerOptions {
-			jvmTarget.set(JvmTarget.JVM_11)
-		}
-	}
 
 	buildFeatures {
 		compose = true
+	}
+}
+
+kotlin {
+	compilerOptions {
+		jvmTarget.set(JvmTarget.JVM_11)
+	}
+}
+
+kover {
+	reports {
+		filters {
+			excludes {
+				// The sample app's UI scaffolding isn't the library under test —
+				// keep the coverage number focused on com.duck.prefshelper.*
+				classes(
+					"*.R", "*.R\$*", "*.BuildConfig",
+					"com.duck.app.ui.*",
+					"com.duck.app.MainActivity*",
+					"com.duck.app.ComposableSingletons*",
+				)
+				annotatedBy("androidx.compose.runtime.Composable")
+			}
+		}
 	}
 }
 
@@ -53,6 +79,10 @@ dependencies {
 
 //    implementation(libs.androidx.dataStore)
 	implementation(project(":PrefsHelper"))
+
+	// Aggregate the library's coverage into this module's Kover report,
+	// since the tests that exercise PrefsHelper live here in :app.
+	kover(project(":PrefsHelper"))
 
 	testImplementation(libs.junit)
 	testImplementation(libs.mockito.core)

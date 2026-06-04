@@ -16,6 +16,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.duck.prefshelper.BaseDataStoreHelper.Companion.supervisorJob
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -24,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.seconds
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -121,8 +123,9 @@ abstract class BaseDataStoreHelper(
 	 * Generic method to delete value from the data store asynchronously.
 	 *
 	 * @param key The key to delete the value for
+	 * @return The [Job] for the launched removal — call [Job.join] to await completion.
 	 */
-	protected inline fun <reified T> removeKeyAsync(key: Preferences.Key<T>) =
+	protected inline fun <reified T> removeKeyAsync(key: Preferences.Key<T>): Job =
 		scope.launch { removeKey(key) }
 
 	/**
@@ -139,8 +142,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected inline fun <reified T> writeValueAsync(key: Preferences.Key<T>, value: T) =
+	protected inline fun <reified T> writeValueAsync(key: Preferences.Key<T>, value: T): Job =
 		scope.launch { writeValue(key, value) }
 
 	/**
@@ -163,9 +167,10 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store or null to delete
+	 * @return The [Job] for the launched write/removal — call [Job.join] to await completion.
 	 */
 	@JvmName("writeNullableValueAsync")
-	protected inline fun <reified T> writeValueAsync(key: Preferences.Key<T>, value: T?) =
+	protected inline fun <reified T> writeValueAsync(key: Preferences.Key<T>, value: T?): Job =
 		if (value == null) removeKeyAsync(key) else writeValueAsync(key, value)
 
 	/**
@@ -205,7 +210,7 @@ abstract class BaseDataStoreHelper(
 	 */
 	protected inline fun <reified T> readValueBlocking(key: Preferences.Key<T>): T? =
 		runBlocking(coroutineContext) {
-			withTimeoutOrNull(2000) {
+			withTimeoutOrNull(2.seconds) {
 				dataStore.data.first()[key]
 			}
 		}
@@ -257,8 +262,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected fun writeIntAsync(key: String, value: Int?) =
+	protected fun writeIntAsync(key: String, value: Int?): Job =
 		writeValueAsync(intPreferencesKey(key), value)
 
 	/**
@@ -308,8 +314,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected fun writeDoubleAsync(key: String, value: Double?) =
+	protected fun writeDoubleAsync(key: String, value: Double?): Job =
 		writeValueAsync(doublePreferencesKey(key), value)
 
 	/**
@@ -368,8 +375,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected fun writeStringAsync(key: String, value: String?) =
+	protected fun writeStringAsync(key: String, value: String?): Job =
 		writeValueAsync(stringPreferencesKey(key), value)
 
 	/**
@@ -428,8 +436,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected fun writeLongAsync(key: String, value: Long?) =
+	protected fun writeLongAsync(key: String, value: Long?): Job =
 		writeValueAsync(longPreferencesKey(key), value)
 
 	/**
@@ -488,8 +497,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected fun writeBooleanAsync(key: String, value: Boolean?) =
+	protected fun writeBooleanAsync(key: String, value: Boolean?): Job =
 		writeValueAsync(booleanPreferencesKey(key), value)
 
 	/**
@@ -547,9 +557,10 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
-	protected fun writeLocalDateTimeAsync(key: String, value: LocalDateTime?) =
+	protected fun writeLocalDateTimeAsync(key: String, value: LocalDateTime?): Job =
 		writeValueAsync(stringPreferencesKey(key), value?.toString())
 
 	/**
@@ -607,9 +618,10 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
-	protected fun writeLocalDateAsync(key: String, value: LocalDate?) =
+	protected fun writeLocalDateAsync(key: String, value: LocalDate?): Job =
 		writeValueAsync(stringPreferencesKey(key), value?.toString())
 
 	/**
@@ -667,9 +679,10 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
-	protected fun writeLocalTimeAsync(key: String, value: LocalTime?) =
+	protected fun writeLocalTimeAsync(key: String, value: LocalTime?): Job =
 		writeValueAsync(stringPreferencesKey(key), value?.toString())
 
 	/**
@@ -726,8 +739,9 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
 	 */
-	protected fun writeEnumAsync(key: String, value: Enum<*>?) =
+	protected fun writeEnumAsync(key: String, value: Enum<*>?): Job =
 		writeValueAsync(stringPreferencesKey(key), value?.name)
 
 	/**

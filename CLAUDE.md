@@ -15,14 +15,18 @@ LocalDateTime, LocalDate, LocalTime, and Enums.
 # Build the library
 ./gradlew :PrefsHelper:build
 
-# Run unit tests
-./gradlew :PrefsHelper:test
+# Run unit tests (BasePrefsHelperTest lives in :app, not :PrefsHelper)
+./gradlew :app:testDebugUnitTest
 
-# Run instrumented tests (requires connected device/emulator)
-./gradlew :PrefsHelper:connectedAndroidTest
+# Run instrumented tests (BaseDataStoreHelperTest; requires connected device/emulator)
+./gradlew :app:connectedAndroidTest
 
 # Run a single instrumented test class (--tests is rejected by connectedAndroidTest)
 ./gradlew :app:connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.duck.app.BaseDataStoreHelperTest
+
+# Coverage report (Kover; aggregates :PrefsHelper into :app since the tests live in :app).
+# Run connectedAndroidTest first on a device to include the instrumented BaseDataStoreHelper coverage.
+./gradlew :app:koverHtmlReport   # HTML -> app/build/reports/kover/html/index.html
 
 # Generate documentation
 ./gradlew :PrefsHelper:dokkaHtml
@@ -47,7 +51,7 @@ The library provides two abstract base classes that consumers extend:
 
 - Wraps Jetpack `DataStore<Preferences>` with type-safe methods
 - Returns `Flow<T>` for reactive reads, plus blocking `readXxxValue()` methods (2s timeout)
-- Both suspend and async (fire-and-forget via `scope.launch`) write methods
+- Both suspend and async write methods. The `writeXxxAsync` methods launch on `scope` and **return the `Job`**, so callers (and tests) can `.join()` to await completion instead of guessing with a delay. Delegate setters discard the `Job` (property setters return `Unit`), so they remain genuinely fire-and-forget.
 - Subclasses pass `Context` and preference name to constructor
 - Null values remove the key from storage
 - Preferred usage is the `*Pref` delegate + `*PrefFlow` alias pair (e.g. `var userId by intPref(KEY, defaultValue = -1)` paired with `val userIdFlow = intPrefFlow(KEY, defaultValue = -1)`). Delegate setters route through the existing `*Async` writes so callers don't need to build their own `CoroutineScope`.
