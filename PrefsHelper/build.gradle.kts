@@ -1,14 +1,16 @@
+import com.android.build.api.dsl.LibraryExtension
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
 	alias(libs.plugins.android.library)
 	alias(libs.plugins.dokka)
+	alias(libs.plugins.kover)
 	`maven-publish`
 }
 
 group = "com.github.projectdelta6"
 
-android {
+configure<LibraryExtension> {
 	namespace = "com.duck.prefshelper"
 	compileSdk = libs.versions.compileSdk.get().toInt()
 
@@ -30,17 +32,18 @@ android {
 		sourceCompatibility = JavaVersion.VERSION_11
 		targetCompatibility = JavaVersion.VERSION_11
 	}
-	kotlin {
-		compilerOptions {
-			jvmTarget.set(JvmTarget.JVM_11)
-		}
-	}
 
 	publishing {
 		singleVariant("release") {
 			withSourcesJar()
 			withJavadocJar()
 		}
+	}
+}
+
+kotlin {
+	compilerOptions {
+		jvmTarget.set(JvmTarget.JVM_11)
 	}
 }
 

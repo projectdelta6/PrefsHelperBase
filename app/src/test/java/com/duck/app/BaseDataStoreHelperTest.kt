@@ -8,8 +8,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Duration.Companion.milliseconds
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -36,6 +38,26 @@ class BaseDataStoreHelperTest {
 		runBlocking {
 			dataStoreHelper.clearPrefs()
 		}
+	}
+
+	/**
+	 * DataStore async/delegate writes are fire-and-forget (`scope.launch`), so reading after a
+	 * fixed [delay] is racy under device load — the write may not have hit disk yet. Poll [read]
+	 * until it satisfies [predicate], or a generous timeout elapses, then return the latest value
+	 * for assertion. Deterministic regardless of how busy the device is.
+	 */
+	private suspend fun <T> awaitValue(
+		timeoutMs: Long = 5_000L,
+		predicate: (T) -> Boolean,
+		read: () -> T,
+	): T {
+		val deadline = System.currentTimeMillis() + timeoutMs
+		var value = read()
+		while (!predicate(value) && System.currentTimeMillis() < deadline) {
+			delay(20.milliseconds)
+			value = read()
+		}
+		return value
 	}
 
 	@Test
@@ -244,13 +266,13 @@ class BaseDataStoreHelperTest {
 				.collect { emissions.add(it) }
 		}
 
-		delay(50) // Initial null emission
+		delay(50.milliseconds) // Initial null emission
 		dataStoreHelper.testWriteString("multi_flow_key", "first")
-		delay(50)
+		delay(50.milliseconds)
 		dataStoreHelper.testWriteString("multi_flow_key", "second")
-		delay(50)
+		delay(50.milliseconds)
 		dataStoreHelper.testWriteString("multi_flow_key", "third")
-		delay(50)
+		delay(50.milliseconds)
 
 		job.join()
 		assertEquals(4, emissions.size)
@@ -265,10 +287,10 @@ class BaseDataStoreHelperTest {
 		val jobs = (1..20).map { index ->
 			launch {
 				dataStoreHelper.testWriteInt("concurrent_key", index)
-				delay(10)
+				delay(10.milliseconds)
 			}
 		}
-		jobs.forEach { it.join() }
+		jobs.joinAll()
 
 		// Verify last write succeeded (any value 1-20 is acceptable)
 		val result = dataStoreHelper.testReadIntValue("concurrent_key")
@@ -278,41 +300,35 @@ class BaseDataStoreHelperTest {
 
 	@Test
 	fun testWriteStringAsync() = runBlocking {
-		dataStoreHelper.testWriteStringAsync("async_key", "async_value")
-		// Give async operation time to complete
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteStringAsync("async_key", "async_value").join()
 		val value = dataStoreHelper.testReadStringValue("async_key")
 		assertEquals("async_value", value)
 	}
 
 	@Test
 	fun testWriteIntAsync() = runBlocking {
-		dataStoreHelper.testWriteIntAsync("async_key", 999)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteIntAsync("async_key", 999).join()
 		val value = dataStoreHelper.testReadIntValue("async_key")
 		assertEquals(999, value)
 	}
 
 	@Test
 	fun testWriteLongAsync() = runBlocking {
-		dataStoreHelper.testWriteLongAsync("async_key", 123123123L)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteLongAsync("async_key", 123123123L).join()
 		val value = dataStoreHelper.testReadLongValue("async_key")
 		assertEquals(123123123L, value)
 	}
 
 	@Test
 	fun testWriteDoubleAsync() = runBlocking {
-		dataStoreHelper.testWriteDoubleAsync("async_key", 9.99)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteDoubleAsync("async_key", 9.99).join()
 		val value = dataStoreHelper.testReadDoubleValue("async_key")
 		assertEquals(9.99, value ?: 0.0, 0.01)
 	}
 
 	@Test
 	fun testWriteBooleanAsync() = runBlocking {
-		dataStoreHelper.testWriteBooleanAsync("async_key", true)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteBooleanAsync("async_key", true).join()
 		val value = dataStoreHelper.testReadBooleanValue("async_key")
 		assertTrue(value ?: false)
 	}
@@ -348,6 +364,66 @@ class BaseDataStoreHelperTest {
 	}
 
 	@Test
+	fun testReadLongFlowWithDefault() = runBlocking {
+		val value = dataStoreHelper.testReadLongFlowWithDefault("nonexistent_key", 888L).first()
+		assertEquals(888L, value)
+	}
+
+	@Test
+	fun testReadDoubleFlowWithDefault() = runBlocking {
+		val value = dataStoreHelper.testReadDoubleFlowWithDefault("nonexistent_key", 3.14).first()
+		assertEquals(3.14, value, 0.01)
+	}
+
+	@Test
+	fun testReadBooleanFlowWithDefault() = runBlocking {
+		val value = dataStoreHelper.testReadBooleanFlowWithDefault("nonexistent_key", true).first()
+		assertTrue(value)
+	}
+
+	@Test
+	fun testReadLocalDateTimeValueWithDefault() = runBlocking {
+		val default = java.time.LocalDateTime.of(2023, 11, 25, 10, 30, 45)
+		val value = dataStoreHelper.testReadLocalDateTimeValueWithDefault("nonexistent_key", default)
+		assertEquals(default, value)
+	}
+
+	@Test
+	fun testReadLocalDateTimeFlowWithDefault() = runBlocking {
+		val default = java.time.LocalDateTime.of(2023, 11, 25, 10, 30, 45)
+		val value = dataStoreHelper.testReadLocalDateTimeFlowWithDefault("nonexistent_key", default).first()
+		assertEquals(default, value)
+	}
+
+	@Test
+	fun testReadLocalDateValueWithDefault() = runBlocking {
+		val default = java.time.LocalDate.of(2023, 11, 25)
+		val value = dataStoreHelper.testReadLocalDateValueWithDefault("nonexistent_key", default)
+		assertEquals(default, value)
+	}
+
+	@Test
+	fun testReadLocalDateFlowWithDefault() = runBlocking {
+		val default = java.time.LocalDate.of(2023, 11, 25)
+		val value = dataStoreHelper.testReadLocalDateFlowWithDefault("nonexistent_key", default).first()
+		assertEquals(default, value)
+	}
+
+	@Test
+	fun testReadLocalTimeValueWithDefault() = runBlocking {
+		val default = java.time.LocalTime.of(14, 30, 45)
+		val value = dataStoreHelper.testReadLocalTimeValueWithDefault("nonexistent_key", default)
+		assertEquals(default, value)
+	}
+
+	@Test
+	fun testReadLocalTimeFlowWithDefault() = runBlocking {
+		val default = java.time.LocalTime.of(14, 30, 45)
+		val value = dataStoreHelper.testReadLocalTimeFlowWithDefault("nonexistent_key", default).first()
+		assertEquals(default, value)
+	}
+
+	@Test
 	fun testWriteAndReadLocalDateTime() = runBlocking {
 		val dateTime = java.time.LocalDateTime.of(2023, 11, 25, 10, 30, 45)
 		dataStoreHelper.testWriteLocalDateTime("datetime_key", dateTime)
@@ -375,8 +451,7 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testWriteLocalDateTimeAsync() = runBlocking {
 		val dateTime = java.time.LocalDateTime.of(2023, 12, 1, 8, 0, 0)
-		dataStoreHelper.testWriteLocalDateTimeAsync("datetime_key", dateTime)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteLocalDateTimeAsync("datetime_key", dateTime).join()
 		val value = dataStoreHelper.testReadLocalDateTimeValue("datetime_key")
 		assertEquals(dateTime, value)
 	}
@@ -409,8 +484,7 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testWriteLocalDateAsync() = runBlocking {
 		val date = java.time.LocalDate.of(2024, 1, 1)
-		dataStoreHelper.testWriteLocalDateAsync("date_key", date)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteLocalDateAsync("date_key", date).join()
 		val value = dataStoreHelper.testReadLocalDateValue("date_key")
 		assertEquals(date, value)
 	}
@@ -443,8 +517,7 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testWriteLocalTimeAsync() = runBlocking {
 		val time = java.time.LocalTime.of(9, 15, 0)
-		dataStoreHelper.testWriteLocalTimeAsync("time_key", time)
-		kotlinx.coroutines.delay(100)
+		dataStoreHelper.testWriteLocalTimeAsync("time_key", time).join()
 		val value = dataStoreHelper.testReadLocalTimeValue("time_key")
 		assertEquals(time, value)
 	}
@@ -453,29 +526,29 @@ class BaseDataStoreHelperTest {
 	fun testWriteAndReadEnum() = runBlocking {
 		// Test using property-based access (like NormalDataStore pattern)
 		dataStoreHelper.testEnumProperty = TestEnum.VALUE_B
-		delay(100)
-		assertEquals(TestEnum.VALUE_B, dataStoreHelper.testEnumProperty)
+		val value = awaitValue(predicate = { it == TestEnum.VALUE_B }) { dataStoreHelper.testEnumProperty }
+		assertEquals(TestEnum.VALUE_B, value)
 	}
 
 	@Test
 	fun testWriteNullEnum() = runBlocking {
 		// Test null handling via direct method calls
 		dataStoreHelper.testEnumProperty = TestEnum.VALUE_B
-		delay(100)
-		assertEquals(TestEnum.VALUE_B, dataStoreHelper.testEnumProperty)
+		assertEquals(
+			TestEnum.VALUE_B,
+			awaitValue(predicate = { it == TestEnum.VALUE_B }) { dataStoreHelper.testEnumProperty },
+		)
 
 		dataStoreHelper.testEnumProperty = null
-		delay(100)
-		assertNull(dataStoreHelper.testEnumProperty)
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.testEnumProperty })
 	}
 
 	@Test
 	fun testReadEnumFlow() = runBlocking {
 		// Test Flow-based enum reading via property
 		dataStoreHelper.testEnumProperty = TestEnum.VALUE_C
-		delay(100)
-		val value = dataStoreHelper.testEnumPropertyFlow.first()
-		assertEquals(TestEnum.VALUE_C, value)
+		awaitValue(predicate = { it == TestEnum.VALUE_C }) { dataStoreHelper.testEnumProperty }
+		assertEquals(TestEnum.VALUE_C, dataStoreHelper.testEnumPropertyFlow.first())
 	}
 
 	@Test
@@ -504,8 +577,8 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testIntPrefDelegateRoundTripsValue() = runBlocking {
 		dataStoreHelper.delegateInt = 42
-		delay(100)
-		assertEquals(42, dataStoreHelper.delegateInt)
+		val value = awaitValue(predicate = { it == 42 }) { dataStoreHelper.delegateInt }
+		assertEquals(42, value)
 	}
 
 	@Test
@@ -517,32 +590,253 @@ class BaseDataStoreHelperTest {
 	@Test
 	fun testNullableIntPrefDelegateRemovesKeyOnNull() = runBlocking {
 		dataStoreHelper.delegateNullableInt = 7
-		delay(100)
-		assertEquals(7, dataStoreHelper.delegateNullableInt)
+		assertEquals(7, awaitValue(predicate = { it == 7 }) { dataStoreHelper.delegateNullableInt })
 
 		dataStoreHelper.delegateNullableInt = null
-		delay(100)
-		assertNull(dataStoreHelper.delegateNullableInt)
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableInt })
 	}
 
 	@Test
 	fun testIntPrefFlowEmitsDelegateWrites() = runBlocking {
 		dataStoreHelper.delegateInt = 5
-		delay(100)
+		awaitValue(predicate = { it == 5 }) { dataStoreHelper.delegateInt }
 		assertEquals(5, dataStoreHelper.delegateIntFlow.first())
 	}
 
 	@Test
 	fun testEnumPrefDelegateRoundTrip() = runBlocking {
 		dataStoreHelper.delegateEnum = TestEnum.VALUE_C
-		delay(100)
-		assertEquals(TestEnum.VALUE_C, dataStoreHelper.delegateEnum)
+		val value = awaitValue(predicate = { it == TestEnum.VALUE_C }) { dataStoreHelper.delegateEnum }
+		assertEquals(TestEnum.VALUE_C, value)
 	}
 
 	@Test
 	fun testEnumPrefDelegateFallsBackToDefault() = runBlocking {
 		dataStoreHelper.testClearPrefs()
 		assertEquals(TestEnum.VALUE_A, dataStoreHelper.delegateEnum)
+	}
+
+	// String delegate
+	@Test
+	fun testStringPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals("fallback", dataStoreHelper.delegateString)
+	}
+
+	@Test
+	fun testStringPrefDelegateRoundTripsValue() = runBlocking {
+		dataStoreHelper.delegateString = "hello"
+		val value = awaitValue(predicate = { it == "hello" }) { dataStoreHelper.delegateString }
+		assertEquals("hello", value)
+	}
+
+	@Test
+	fun testNullableStringPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableString)
+	}
+
+	@Test
+	fun testNullableStringPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableString = "temp"
+		assertEquals("temp", awaitValue(predicate = { it == "temp" }) { dataStoreHelper.delegateNullableString })
+
+		dataStoreHelper.delegateNullableString = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableString })
+	}
+
+	@Test
+	fun testStringPrefFlowEmitsDelegateWrites() = runBlocking {
+		dataStoreHelper.delegateString = "flowed"
+		awaitValue(predicate = { it == "flowed" }) { dataStoreHelper.delegateString }
+		assertEquals("flowed", dataStoreHelper.delegateStringFlow.first())
+	}
+
+	// Long delegate
+	@Test
+	fun testLongPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(-1L, dataStoreHelper.delegateLong)
+	}
+
+	@Test
+	fun testLongPrefDelegateRoundTripsValue() = runBlocking {
+		dataStoreHelper.delegateLong = 123456789L
+		val value = awaitValue(predicate = { it == 123456789L }) { dataStoreHelper.delegateLong }
+		assertEquals(123456789L, value)
+	}
+
+	@Test
+	fun testLongPrefFlowEmitsDelegateWrites() = runBlocking {
+		dataStoreHelper.delegateLong = 42L
+		awaitValue(predicate = { it == 42L }) { dataStoreHelper.delegateLong }
+		assertEquals(42L, dataStoreHelper.delegateLongFlow.first())
+	}
+
+	// Double delegate
+	@Test
+	fun testDoublePrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(-1.0, dataStoreHelper.delegateDouble, 0.00001)
+	}
+
+	@Test
+	fun testDoublePrefDelegateRoundTripsValue() = runBlocking {
+		dataStoreHelper.delegateDouble = 3.14159
+		val value = awaitValue(predicate = { it == 3.14159 }) { dataStoreHelper.delegateDouble }
+		assertEquals(3.14159, value, 0.00001)
+	}
+
+	@Test
+	fun testDoublePrefFlowEmitsDelegateWrites() = runBlocking {
+		dataStoreHelper.delegateDouble = 2.71828
+		awaitValue(predicate = { it == 2.71828 }) { dataStoreHelper.delegateDouble }
+		assertEquals(2.71828, dataStoreHelper.delegateDoubleFlow.first(), 0.00001)
+	}
+
+	// Boolean delegate
+	@Test
+	fun testBooleanPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(false, dataStoreHelper.delegateBoolean)
+	}
+
+	@Test
+	fun testBooleanPrefDelegateRoundTripsValue() = runBlocking {
+		dataStoreHelper.delegateBoolean = true
+		val value = awaitValue(predicate = { it }) { dataStoreHelper.delegateBoolean }
+		assertTrue(value)
+	}
+
+	@Test
+	fun testBooleanPrefFlowEmitsDelegateWrites() = runBlocking {
+		dataStoreHelper.delegateBoolean = true
+		awaitValue(predicate = { it }) { dataStoreHelper.delegateBoolean }
+		assertEquals(true, dataStoreHelper.delegateBooleanFlow.first())
+	}
+
+	// Nullable Long delegate
+	@Test
+	fun testNullableLongPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableLong)
+	}
+
+	@Test
+	fun testNullableLongPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableLong = 99L
+		assertEquals(99L, awaitValue(predicate = { it == 99L }) { dataStoreHelper.delegateNullableLong })
+
+		dataStoreHelper.delegateNullableLong = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableLong })
+	}
+
+	// Nullable Double delegate
+	@Test
+	fun testNullableDoublePrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableDouble)
+	}
+
+	@Test
+	fun testNullableDoublePrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableDouble = 1.5
+		assertEquals(1.5, awaitValue(predicate = { it == 1.5 }) { dataStoreHelper.delegateNullableDouble } ?: 0.0, 0.00001)
+
+		dataStoreHelper.delegateNullableDouble = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableDouble })
+	}
+
+	// Nullable Boolean delegate
+	@Test
+	fun testNullableBooleanPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableBoolean)
+	}
+
+	@Test
+	fun testNullableBooleanPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableBoolean = true
+		assertEquals(true, awaitValue(predicate = { it == true }) { dataStoreHelper.delegateNullableBoolean })
+
+		dataStoreHelper.delegateNullableBoolean = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableBoolean })
+	}
+
+	// Nullable Enum delegate
+	@Test
+	fun testNullableEnumPrefDelegateReturnsNullWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertNull(dataStoreHelper.delegateNullableEnum)
+	}
+
+	@Test
+	fun testNullableEnumPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableEnum = TestEnum.VALUE_B
+		assertEquals(
+			TestEnum.VALUE_B,
+			awaitValue(predicate = { it == TestEnum.VALUE_B }) { dataStoreHelper.delegateNullableEnum },
+		)
+
+		dataStoreHelper.delegateNullableEnum = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableEnum })
+	}
+
+	// LocalDateTime delegate
+	@Test
+	fun testLocalDateTimePrefDelegateRoundTripsValue() = runBlocking {
+		val dateTime = java.time.LocalDateTime.of(2023, 11, 25, 10, 30, 45)
+		dataStoreHelper.delegateLocalDateTime = dateTime
+		val value = awaitValue(predicate = { it == dateTime }) { dataStoreHelper.delegateLocalDateTime }
+		assertEquals(dateTime, value)
+	}
+
+	@Test
+	fun testLocalDateTimePrefDelegateRemovesKeyOnNull() = runBlocking {
+		val dateTime = java.time.LocalDateTime.of(2023, 11, 25, 10, 30, 45)
+		dataStoreHelper.delegateLocalDateTime = dateTime
+		assertNotNull(awaitValue(predicate = { it == dateTime }) { dataStoreHelper.delegateLocalDateTime })
+
+		dataStoreHelper.delegateLocalDateTime = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateLocalDateTime })
+	}
+
+	// LocalDate delegate
+	@Test
+	fun testLocalDatePrefDelegateRoundTripsValue() = runBlocking {
+		val date = java.time.LocalDate.of(2023, 11, 25)
+		dataStoreHelper.delegateLocalDate = date
+		val value = awaitValue(predicate = { it == date }) { dataStoreHelper.delegateLocalDate }
+		assertEquals(date, value)
+	}
+
+	@Test
+	fun testLocalDatePrefDelegateRemovesKeyOnNull() = runBlocking {
+		val date = java.time.LocalDate.of(2023, 11, 25)
+		dataStoreHelper.delegateLocalDate = date
+		assertNotNull(awaitValue(predicate = { it == date }) { dataStoreHelper.delegateLocalDate })
+
+		dataStoreHelper.delegateLocalDate = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateLocalDate })
+	}
+
+	// LocalTime delegate
+	@Test
+	fun testLocalTimePrefDelegateRoundTripsValue() = runBlocking {
+		val time = java.time.LocalTime.of(14, 30, 45)
+		dataStoreHelper.delegateLocalTime = time
+		val value = awaitValue(predicate = { it == time }) { dataStoreHelper.delegateLocalTime }
+		assertEquals(time, value)
+	}
+
+	@Test
+	fun testLocalTimePrefDelegateRemovesKeyOnNull() = runBlocking {
+		val time = java.time.LocalTime.of(14, 30, 45)
+		dataStoreHelper.delegateLocalTime = time
+		assertNotNull(awaitValue(predicate = { it == time }) { dataStoreHelper.delegateLocalTime })
+
+		dataStoreHelper.delegateLocalTime = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateLocalTime })
 	}
 
 	enum class TestEnum {
@@ -666,11 +960,45 @@ class BaseDataStoreHelperTest {
 		val delegateIntFlow = intPrefFlow(KEY_DELEGATE_INT, defaultValue = -1)
 		var delegateEnum by enumPref(KEY_DELEGATE_ENUM, default = TestEnum.VALUE_A)
 
+		var delegateString by stringPref(KEY_DELEGATE_STRING, defaultValue = "fallback")
+		var delegateNullableString by stringPref(KEY_DELEGATE_NULLABLE_STRING)
+		val delegateStringFlow = stringPrefFlow(KEY_DELEGATE_STRING, defaultValue = "fallback")
+
+		var delegateLong by longPref(KEY_DELEGATE_LONG, defaultValue = -1L)
+		var delegateNullableLong by longPref(KEY_DELEGATE_NULLABLE_LONG)
+		val delegateLongFlow = longPrefFlow(KEY_DELEGATE_LONG, defaultValue = -1L)
+
+		var delegateDouble by doublePref(KEY_DELEGATE_DOUBLE, defaultValue = -1.0)
+		var delegateNullableDouble by doublePref(KEY_DELEGATE_NULLABLE_DOUBLE)
+		val delegateDoubleFlow = doublePrefFlow(KEY_DELEGATE_DOUBLE, defaultValue = -1.0)
+
+		var delegateBoolean by booleanPref(KEY_DELEGATE_BOOLEAN, defaultValue = false)
+		var delegateNullableBoolean by booleanPref(KEY_DELEGATE_NULLABLE_BOOLEAN)
+		val delegateBooleanFlow = booleanPrefFlow(KEY_DELEGATE_BOOLEAN, defaultValue = false)
+
+		var delegateNullableEnum by enumPref<TestEnum>(KEY_DELEGATE_NULLABLE_ENUM)
+
+		var delegateLocalDateTime by localDateTimePref(KEY_DELEGATE_LDT)
+		var delegateLocalDate by localDatePref(KEY_DELEGATE_LD)
+		var delegateLocalTime by localTimePref(KEY_DELEGATE_LT)
+
 		companion object {
 			private const val KEY_TEST_ENUM = "test_enum_key"
 			private const val KEY_DELEGATE_INT = "delegate_int_key"
 			private const val KEY_DELEGATE_NULLABLE_INT = "delegate_nullable_int_key"
 			private const val KEY_DELEGATE_ENUM = "delegate_enum_key"
+			private const val KEY_DELEGATE_STRING = "delegate_string_key"
+			private const val KEY_DELEGATE_NULLABLE_STRING = "delegate_nullable_string_key"
+			private const val KEY_DELEGATE_LONG = "delegate_long_key"
+			private const val KEY_DELEGATE_NULLABLE_LONG = "delegate_nullable_long_key"
+			private const val KEY_DELEGATE_DOUBLE = "delegate_double_key"
+			private const val KEY_DELEGATE_NULLABLE_DOUBLE = "delegate_nullable_double_key"
+			private const val KEY_DELEGATE_BOOLEAN = "delegate_boolean_key"
+			private const val KEY_DELEGATE_NULLABLE_BOOLEAN = "delegate_nullable_boolean_key"
+			private const val KEY_DELEGATE_NULLABLE_ENUM = "delegate_nullable_enum_key"
+			private const val KEY_DELEGATE_LDT = "delegate_ldt_key"
+			private const val KEY_DELEGATE_LD = "delegate_ld_key"
+			private const val KEY_DELEGATE_LT = "delegate_lt_key"
 		}
 
 		suspend fun testClearPrefs() = clearPrefs()

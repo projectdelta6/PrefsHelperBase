@@ -15,14 +15,17 @@ LocalDateTime, LocalDate, LocalTime, and Enums.
 # Build the library
 ./gradlew :PrefsHelper:build
 
-# Run unit tests
-./gradlew :PrefsHelper:test
+# Run all tests (both test classes live in :app/src/test and run on the JVM —
+# BaseDataStoreHelperTest runs under Robolectric, so no device/emulator is needed)
+./gradlew :app:testDebugUnitTest
 
-# Run instrumented tests (requires connected device/emulator)
-./gradlew :PrefsHelper:connectedAndroidTest
+# Run a single test class
+./gradlew :app:testDebugUnitTest --tests "com.duck.app.BaseDataStoreHelperTest"
 
-# Run a single instrumented test class (--tests is rejected by connectedAndroidTest)
-./gradlew :app:connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.duck.app.BaseDataStoreHelperTest
+# Coverage (Kover; aggregates :PrefsHelper into :app since the tests live in :app).
+# Android module -> variant-suffixed tasks. No device needed.
+./gradlew :app:koverHtmlReportDebug   # HTML -> app/build/reports/kover/htmlDebug/index.html
+./gradlew :app:koverVerifyDebug       # fails below the coverage floor (minBound in app/build.gradle.kts)
 
 # Generate documentation
 ./gradlew :PrefsHelper:dokkaHtml
@@ -47,7 +50,7 @@ The library provides two abstract base classes that consumers extend:
 
 - Wraps Jetpack `DataStore<Preferences>` with type-safe methods
 - Returns `Flow<T>` for reactive reads, plus blocking `readXxxValue()` methods (2s timeout)
-- Both suspend and async (fire-and-forget via `scope.launch`) write methods
+- Both suspend and async write methods. The `writeXxxAsync` methods launch on `scope` and **return the `Job`**, so callers (and tests) can `.join()` to await completion instead of guessing with a delay. Delegate setters discard the `Job` (property setters return `Unit`), so they remain genuinely fire-and-forget.
 - Subclasses pass `Context` and preference name to constructor
 - Null values remove the key from storage
 - Preferred usage is the `*Pref` delegate + `*PrefFlow` alias pair (e.g. `var userId by intPref(KEY, defaultValue = -1)` paired with `val userIdFlow = intPrefFlow(KEY, defaultValue = -1)`). Delegate setters route through the existing `*Async` writes so callers don't need to build their own `CoroutineScope`.
@@ -57,6 +60,8 @@ Both classes support: `String`, `Int`, `Long`, `Boolean`, `LocalDateTime`, `Loca
 ## Gotchas
 
 - **Inline reified factories that access `protected` members**: an `inline fun <reified T>` that returns an anonymous object (e.g. a `ReadWriteProperty`) calling `protected` methods on `BaseDataStoreHelper` throws `IllegalAccessError` at runtime — the anonymous class is emitted inside the *subclass* at inline time, losing JVM-level protected access. Fix: split into a thin `inline` + `reified` wrapper that forwards to a non-inline `@PublishedApi internal` helper which owns the anonymous object. See `enumPref` / `enumPrefInternal` in `BaseDataStoreHelper.kt`. `BasePrefsHelper` is unaffected because its get/set accessors are `public`.
+
+- **Tests are JVM-only (Robolectric), not instrumented**: both test classes live in `app/src/test`. `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
 
 ## Project Structure
 

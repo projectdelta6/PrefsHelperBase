@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+# Cancel superseded runs on the same branch/PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests & coverage gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21' # Runs Gradle/AGP; library still compiles to JVM 11.
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # All tests run on the JVM — BaseDataStoreHelperTest runs under Robolectric via
+      # the AndroidJUnit4 delegating runner — so no emulator is needed. koverVerifyDebug
+      # enforces the coverage floor over com.duck.prefshelper.* (both helpers).
+      - name: Run tests and verify coverage
+        run: ./gradlew :app:testDebugUnitTest :app:koverXmlReportDebug :app:koverVerifyDebug
+
+      - name: Upload Kover coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kover-report
+          path: app/build/reports/kover/
+          if-no-files-found: ignore
