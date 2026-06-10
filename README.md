@@ -92,3 +92,9 @@ Both `BasePrefsHelper` and `BaseDataStoreHelper` support `String`, `Int`, `Long`
 - `BaseDataStoreHelper` supports `Double`.
 
 Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)` (assigning `null` clears the stored value on DataStore, or stores the sentinel on SharedPreferences for temporal types). `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads.
+
+## R8 / ProGuard / Minification
+
+PrefsHelper is fully compatible with R8 (including full mode) and requires **no consumer ProGuard rules** (the shipped `consumer-rules.pro` is intentionally empty). Preference keys are always explicit string arguments you pass to the `*Pref(...)` delegates — they are **never** derived from Kotlin property names via reflection. R8 is free to rename, merge, and repackage your `BasePrefsHelper`/`BaseDataStoreHelper` subclasses and their properties without changing any persisted key. Enum values are stored by `Enum.name` (preserved by R8's default Android rules), so enum prefs survive obfuscation.
+
+The one thing to keep in mind lives in *consumer* code, not the library: pass real string literals as keys. Since keys are explicit strings here, the classic prefs-library footgun (key derived from a renamed identifier) doesn't apply.
