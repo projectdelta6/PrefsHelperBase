@@ -24,6 +24,10 @@ dependencies {
 }
 ```
 
+`minSdk 21`. `datastore-preferences` is exposed as an `api` dependency, so `DataStore<Preferences>` is visible to you without declaring it yourself.
+
+Upgrading from 1.x? See [Migrating to 2.0](#migrating-to-20) — it is a breaking release.
+
 ## Usage
 
 ### `BasePrefsHelper` (SharedPreferences)
@@ -47,7 +51,7 @@ class UserPrefs(context: Context) : BasePrefsHelper() {
 
 ### `BaseDataStoreHelper` (DataStore<Preferences>)
 
-Subclass `BaseDataStoreHelper`, pass a `Context` and DataStore name. Use `*Pref` for imperative read/write and the matching `*PrefFlow` for reactive observation — the delegate setter dispatches to the library's internal scope so you don't need to open your own `CoroutineScope`.
+Subclass `BaseDataStoreHelper`, pass a `Context` and DataStore name. Use `*Pref` for imperative read/write and the matching `*PrefFlow` for reactive observation — the delegate setter dispatches to the helper's `scope`, so you don't need to open your own `CoroutineScope`. That scope is injectable if you want to own it; see [Coroutines: `dispatcher` and `scope`](#coroutines-dispatcher-and-scope).
 
 ```kotlin
 class AppPrefs(context: Context) : BaseDataStoreHelper(context, "app_prefs") {
@@ -216,7 +220,9 @@ suspend fun onLogout() {
 if that runs on a screen-scoped coroutine (`viewModelScope`, `screenModelScope`) and the user navigates away mid-call, you can now end up with SharedPreferences cleared and DataStore not. Fix it deliberately — either run logout on an application-lifetime scope, or wrap the body:
 
 ```kotlin
-suspend fun onLogout() = withContext(NonCancellable) { … }
+suspend fun onLogout() = withContext(NonCancellable) {
+    // … the clears, as before
+}
 ```
 
 Anywhere else you relied on a prefs write surviving its caller's cancellation needs the same treatment.
