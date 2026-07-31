@@ -13,11 +13,15 @@
 #
 # `install:` overrides JitPack's default, which would be:
 #   ./gradlew clean -Pgroup=$GROUP -Pversion=$VERSION -xtest -xlint assemble publishToMavenLocal
-# That `assemble` builds the :app sample module too — over half the build for
-# something that is never published. Scoping to :PrefsHelper takes the build
-# from ~1m53s to ~12s. GROUP and VERSION are JitPack-provided environment
-# variables and MUST be passed through, or the artifact publishes as
-# "unspecified".
+# That `assemble` builds the :app sample module too — something that is never
+# published. Scoping to :PrefsHelper drops the build from 158 executed tasks to
+# 31 (measured: 2.0.0-beta01 vs 2.0.0-beta02 build logs). Wall time barely moves
+# on JitPack, because a cold build there is dominated by downloading the Gradle
+# distribution and resolving dependencies, not by task execution — the win is
+# in work done and things that can break, not minutes.
+#
+# GROUP and VERSION are JitPack-provided environment variables and MUST be
+# passed through, or the artifact publishes as "unspecified".
 #
 # Only :PrefsHelper applies maven-publish, so it remains the single published
 # module and consumers keep resolving it as com.github.projectdelta6:PrefsHelperBase.

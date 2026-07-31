@@ -71,10 +71,20 @@ abstract class BaseDataStoreHelper(
 	 * deterministic unit tests, or to configure migrations or a corruption handler — use the
 	 * primary constructor instead.
 	 *
+	 * The store this creates always runs its own internal actor on [Dispatchers.IO], regardless of
+	 * [dispatcher] — matching what the `preferencesDataStore` delegate did before 2.0. Binding it to
+	 * a caller-supplied [dispatcher] instead would be a silent behaviour change, and a confined
+	 * dispatcher (`Main`, single-threaded, a paused test dispatcher) would then deadlock
+	 * [readValueBlocking] against its own store. Use the primary constructor if you genuinely want
+	 * to control where the store schedules its work.
+	 *
 	 * @param context Any [Context]; the application context is used internally
 	 * @param preferenceName Name of the preferences data store file
-	 * @param dispatcher The [CoroutineDispatcher] `suspend` functions and the DataStore's own IO run on
-	 * @param scope The [CoroutineScope] the `*Async` writes are launched in
+	 * @param dispatcher The [CoroutineDispatcher] `suspend` functions run on. Does **not** affect the
+	 * store's own IO — see above.
+	 * @param scope The [CoroutineScope] the `*Async` writes are launched in. Note this does not own
+	 * the store's internal actor either, so a `CoroutineExceptionHandler` here sees failures from the
+	 * `*Async` writes, not from DataStore itself.
 	 */
 	constructor(
 		context: Context,
@@ -83,7 +93,7 @@ abstract class BaseDataStoreHelper(
 		scope: CoroutineScope = CoroutineScope(dispatcher + SupervisorJob()),
 	) : this(
 		dataStore = PreferenceDataStoreFactory.create(
-			scope = CoroutineScope(dispatcher + SupervisorJob()),
+			scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
 			produceFile = { context.applicationContext.preferencesDataStoreFile(preferenceName) },
 		),
 		dispatcher = dispatcher,

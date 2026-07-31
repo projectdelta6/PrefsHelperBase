@@ -15,7 +15,7 @@ LocalDateTime, LocalDate, LocalTime, and Enums.
 # Build the library
 ./gradlew :PrefsHelper:build
 
-# Run all tests (both test classes live in :app/src/test and run on the JVM —
+# Run all tests (all three test classes live in :app/src/test and run on the JVM —
 # BaseDataStoreHelperTest runs under Robolectric, so no device/emulator is needed)
 ./gradlew :app:testDebugUnitTest
 
@@ -63,7 +63,7 @@ Both classes support: `String`, `Int`, `Long`, `Boolean`, `LocalDateTime`, `Loca
 
 - **Inline reified factories that access `protected` members**: an `inline fun <reified T>` that returns an anonymous object (e.g. a `ReadWriteProperty`) calling `protected` methods on `BaseDataStoreHelper` throws `IllegalAccessError` at runtime — the anonymous class is emitted inside the *subclass* at inline time, losing JVM-level protected access. Fix: split into a thin `inline` + `reified` wrapper that forwards to a non-inline `@PublishedApi internal` helper which owns the anonymous object. See `enumPref` / `enumPrefInternal` in `BaseDataStoreHelper.kt`. `BasePrefsHelper` is unaffected because its get/set accessors are `public`.
 
-- **Tests are JVM-only (Robolectric), not instrumented**: both test classes live in `app/src/test`. `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
+- **Tests are JVM-only (Robolectric), not instrumented**: all three test classes live in `app/src/test` (`BasePrefsHelperTest`, `BaseDataStoreHelperTest`, and `BaseDataStoreHelperInjectionTest`). `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
 
 ## Project Structure
 

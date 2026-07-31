@@ -96,6 +96,8 @@ class AppPrefs(
 }
 ```
 
+Be clear about what that handler does and doesn't cover: `scope` owns the `*Async` writes and the delegate setters, so it sees their failures. It does **not** own DataStore's own internal actor, which has its own `SupervisorJob` — a corrupted-file or disk error surfacing from inside DataStore won't reach this handler. Injecting a scope is not "now I catch everything prefs-related".
+
 ### Injecting a `DataStore` for tests
 
 `BaseDataStoreHelper`'s primary constructor takes the `DataStore<Preferences>` directly, so tests can supply one backed by a temp file and a test scheduler and drop the sleep-and-hope pattern entirely. Forward both constructors from your subclass:
@@ -118,14 +120,21 @@ class AppPrefs : BaseDataStoreHelper {
 Then, in a test:
 
 ```kotlin
+@get:Rule val tempFolder = TemporaryFolder()
+private var fileCount = 0
+
 val store = PreferenceDataStoreFactory.create(
     scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job()),
-    produceFile = { tempFolder.newFile("test.preferences_pb") },
+    // Not tempFolder.newFile(...) — that pre-creates the file, and throws if
+    // produceFile is ever invoked twice. Hand DataStore a path it owns.
+    produceFile = { File(tempFolder.root, "test_${fileCount++}.preferences_pb") },
 )
 val prefs = AppPrefs(store, StandardTestDispatcher(testScheduler), backgroundScope)
 ```
 
 Give every test a fresh file — DataStore throws if two live instances point at the same one — and cancel the store's scope in teardown to release the file lock.
+
+The library's own `BaseDataStoreHelperInjectionTest` is a worked example of this if you want something to copy.
 
 ### Composing a single façade
 
@@ -163,12 +172,12 @@ Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nulla
 
 **Most subclasses need no change at all.** If you extend `BasePrefsHelper()` or `BaseDataStoreHelper(context, "name")` without passing a coroutine context of your own, you are already on the new defaults.
 
-**Only one item on this list can change behaviour without the compiler telling you: item 2.** Everything else is a removed or retyped symbol, so it fails the build and you'll find it immediately. Read item 2 properly.
+**Two items on this list change behaviour without the compiler telling you: items 2 and 5.** The rest are removed or retyped symbols, so they fail the build and you'll find them immediately. Item 2 is the one that can corrupt state — read it properly. Item 5 only bites a specific threading arrangement.
 
 A beta is published for testing ahead of the 2.0.0 release:
 
 ```kotlin
-implementation("com.github.projectdelta6:PrefsHelperBase:2.0.0-beta01")
+implementation("com.github.projectdelta6:PrefsHelperBase:2.0.0-beta03")
 ```
 
 ### 1. `coroutineContext` → `dispatcher` (+ optional `scope`)
@@ -232,7 +241,9 @@ DataStore is already main-safe, so the hop bought nothing and the `Job` it carri
 
 ### 6. New, not breaking: the `DataStore` is injectable
 
-`BaseDataStoreHelper`'s primary constructor now takes a `DataStore<Preferences>` directly. Nothing forces you to use it — the `(context, preferenceName)` convenience constructor is unchanged — but it's what finally makes DataStore-backed subclasses unit-testable without sleeps. See [Injecting a `DataStore` for tests](#injecting-a-datastore-for-tests).
+`BaseDataStoreHelper`'s primary constructor now takes a `DataStore<Preferences>` directly. Nothing forces you to use it — the `(context, preferenceName)` convenience constructor is unchanged, in signature *and* in scheduling — but it's what finally makes DataStore-backed subclasses unit-testable without sleeps. See [Injecting a `DataStore` for tests](#injecting-a-datastore-for-tests).
+
+The convenience constructor deliberately keeps the store's own internal actor on `Dispatchers.IO` whatever `dispatcher` you pass, exactly as the old `preferencesDataStore` delegate did. Binding the store to a caller-supplied dispatcher would be a silent behaviour change, and a confined one (`Main`, single-threaded, a paused test dispatcher) would deadlock `readValueBlocking` against its own store. If you actually want to control where the store schedules, use the primary constructor.
 
 ## R8 / ProGuard / Minification
 

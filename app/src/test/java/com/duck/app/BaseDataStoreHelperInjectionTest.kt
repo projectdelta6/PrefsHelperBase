@@ -248,6 +248,61 @@ class BaseDataStoreHelperInjectionTest {
 		assertNull(helper.testReadStringFlow("clear_key").first())
 	}
 
+	/**
+	 * The redesign's claim is that `clearPrefs` *and the suspending writes* became caller-cancellable,
+	 * so the writes need their own guard rather than riding on the clearPrefs tests.
+	 *
+	 * The nullable `writeValue` overload is the one that routes through `withContext(dispatcher)`,
+	 * so it's the path that changed. Same shape as the clearPrefs pair: cancel before advancing and
+	 * the write must not land.
+	 */
+	@Test
+	fun testSuspendingWriteIsCallerCancellable() = runTest {
+		val writeDispatcher = StandardTestDispatcher(testScheduler)
+		val helper = InjectableDataStoreHelper(
+			dataStore = newDataStore(testScheduler),
+			dispatcher = writeDispatcher,
+			scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + SupervisorJob()),
+		)
+
+		val writeJob = launch(start = CoroutineStart.UNDISPATCHED) {
+			helper.testWriteString("cancelled_write", "should_not_land")
+		}
+		// Suspended inside withContext(writeDispatcher) — the edit has not run.
+		assertTrue(writeJob.isActive)
+		writeJob.cancel()
+		assertTrue(writeJob.isCancelled)
+
+		advanceUntilIdle()
+
+		assertNull(
+			"Cancelled write must not reach the store",
+			helper.testReadStringFlow("cancelled_write").first(),
+		)
+	}
+
+	/**
+	 * Positive path companion to [testSuspendingWriteIsCallerCancellable], so that test cannot pass
+	 * merely because the write never worked.
+	 */
+	@Test
+	fun testSuspendingWriteLandsWhenNotCancelled() = runTest {
+		val writeDispatcher = StandardTestDispatcher(testScheduler)
+		val helper = InjectableDataStoreHelper(
+			dataStore = newDataStore(testScheduler),
+			dispatcher = writeDispatcher,
+			scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + SupervisorJob()),
+		)
+
+		val writeJob = launch(start = CoroutineStart.UNDISPATCHED) {
+			helper.testWriteString("landed_write", "should_land")
+		}
+		advanceUntilIdle()
+		writeJob.join()
+
+		assertEquals("should_land", helper.testReadStringFlow("landed_write").first())
+	}
+
 	// endregion
 
 	// region 5 — Same cancellation guard for BasePrefsHelper
