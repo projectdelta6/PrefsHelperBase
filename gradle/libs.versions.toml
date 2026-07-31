@@ -7,6 +7,7 @@ dokka = "2.2.0"
 kover = "0.9.9"
 dataStore = "1.2.1"
 coroutines = "1.11.0"
+koin = "4.1.1"
 mockitoCore = "5.23.0"
 mockitoKotlin = "6.3.0"
 robolectric = "4.16.1"
@@ -36,6 +37,8 @@ junit = { module = "junit:junit", version.ref = "junit" }
 
 androidx-dataStore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "dataStore" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
+koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
 
 android-documentation-plugin = { module = "org.jetbrains.dokka:android-documentation-plugin", version.ref = "dokka" }
 

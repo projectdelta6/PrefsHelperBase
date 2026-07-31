@@ -67,6 +67,50 @@ class AppPrefs(context: Context) : BaseDataStoreHelper(context, "app_prefs") {
 }
 ```
 
+### One instance per DataStore file — required
+
+**`BaseDataStoreHelper` subclasses must be singletons.** DataStore permits only one live instance per file per process; construct a second one over the same file and it throws:
+
+```
+IllegalStateException: There are multiple DataStores active for the same file
+```
+
+This is a DataStore rule, not one this library adds, and it is easy to trip by accident — building a helper in `Activity.onCreate` is enough, because a configuration change constructs another one while the first is still alive.
+
+`BasePrefsHelper` has no such constraint: `Context.getSharedPreferences` already returns a process-wide shared instance, so constructing several is wasteful but harmless.
+
+**With a DI container**, register it as a singleton and you're done — this is the whole enforcement mechanism:
+
+```kotlin
+// Koin
+single { AppPrefs(androidContext(), get(named("appScope"))) }   // correct
+factory { AppPrefs(androidContext(), get(named("appScope"))) }  // throws on the second injection
+```
+
+```kotlin
+// Hilt
+@Provides @Singleton
+fun provideAppPrefs(@ApplicationContext context: Context): AppPrefs = AppPrefs(context)
+```
+
+**Without a DI container**, you have to enforce it yourself. A Kotlin `object` works if you don't need a `Context` at construction; otherwise use a double-checked singleton and always pass the *application* context, never an Activity:
+
+```kotlin
+class AppPrefs private constructor(context: Context) : BaseDataStoreHelper(context, "app_prefs") {
+
+    companion object {
+        @Volatile private var INSTANCE: AppPrefs? = null
+
+        fun getInstance(context: Context): AppPrefs =
+            INSTANCE ?: synchronized(this) {
+                INSTANCE ?: AppPrefs(context.applicationContext).also { INSTANCE = it }
+            }
+    }
+}
+```
+
+The sample app in `app/` shows the DI version, and its `PrefsHelper.kt` notes what the `getInstance()` it used to have was actually buying.
+
 ### Coroutines: `dispatcher` and `scope`
 
 Both base classes take a `dispatcher`; `BaseDataStoreHelper` also takes a `scope`. They do two separate jobs and neither defaults will surprise you:

@@ -87,6 +87,11 @@ dependencies {
 //    implementation(libs.androidx.dataStore)
 	implementation(project(":PrefsHelper"))
 
+	// Sample only — the library itself is DI-agnostic and depends on no DI framework.
+	// Used to demonstrate injecting an application-lifetime scope and guaranteeing the
+	// one-instance-per-DataStore-file rule structurally instead of via a hand-rolled singleton.
+	implementation(libs.koin.android)
+
 	// Aggregate the library's coverage into this module's Kover report,
 	// since the tests that exercise PrefsHelper live here in :app.
 	kover(project(":PrefsHelper"))
@@ -100,6 +105,7 @@ dependencies {
 	testImplementation(libs.androidx.test.ext.junit)
 	testImplementation(libs.robolectric)
 	testImplementation(libs.kotlinx.coroutines.test)
+	testImplementation(libs.koin.test)
 
 	debugImplementation(libs.androidx.compose.ui.tooling)
 }

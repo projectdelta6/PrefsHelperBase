@@ -4,15 +4,27 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.duck.prefshelper.BaseDataStoreHelper
 import com.duck.prefshelper.BasePrefsHelper
+import kotlinx.coroutines.CoroutineScope
 
-class PrefsHelper(context: Context) {
-	private val normalPrefs by lazy { NormalPrefs(context) }
-	private val devicePrefs by lazy { DevicePrefs(context) }
-	private val normalDataStore by lazy { NormalDataStore.getInstance(context) }
-
+/**
+ * A façade over several backing preference stores, so the rest of the app injects one type and
+ * cross-cutting operations like "clear everything on logout" live in one place.
+ *
+ * The sub-helpers arrive by injection rather than being constructed here — see
+ * `com.duck.app.di.prefsModule`. That is what guarantees there is exactly one [NormalDataStore] in
+ * the process, which DataStore requires; before 2.0 this sample hand-rolled a `getInstance()`
+ * double-checked singleton to achieve the same thing.
+ */
+class PrefsHelper(
+	private val normalPrefs: NormalPrefs,
+	private val devicePrefs: DevicePrefs,
+	private val normalDataStore: NormalDataStore,
+) {
 	var exampleNormalValue by normalPrefs::exampleValue
 
 	var exampleDeviceValue by devicePrefs::exampleValue
+
+	var lastSeen by normalPrefs::lastSeen
 
 	var exampleDataStoreValue by normalDataStore::exampleValue
 	val exampleDataStoreValueFlow = normalDataStore.exampleValueFlow
@@ -23,14 +35,32 @@ class PrefsHelper(context: Context) {
 	}
 }
 
+/**
+ * A [BasePrefsHelper] that also demonstrates [BasePrefsHelper.migrateIfNeeded].
+ */
 class NormalPrefs(context: Context) : BasePrefsHelper() {
 	override val sharedPreferences: SharedPreferences =
 		context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
 
+	init {
+		// Runs at most once per version. An install written by 1.x may still hold the old -1L
+		// sentinel for temporal keys, which 2.0 would otherwise read as 1969-12-31.
+		migrateIfNeeded(currentVersion = PREFS_VERSION) { fromVersion ->
+			if (fromVersion < 2) {
+				migrateLegacyTemporalSentinels(KEY_LAST_SEEN)
+			}
+		}
+	}
+
 	var exampleValue by stringPref(KEY_EXAMPLE, defaultValue = "")
+	var lastSeen by datePref(KEY_LAST_SEEN)
 
 	companion object {
 		const val KEY_EXAMPLE = "example_key"
+		const val KEY_LAST_SEEN = "last_seen"
+
+		/** Bump alongside a new branch in the [migrateIfNeeded] block above. */
+		private const val PREFS_VERSION = 2
 	}
 }
 
@@ -45,21 +75,28 @@ class DevicePrefs(context: Context) : BasePrefsHelper() {
 	}
 }
 
-class NormalDataStore private constructor(context: Context) : BaseDataStoreHelper(context, "normal_dataStore") {
+/**
+ * No `getInstance()` here any more.
+ *
+ * DataStore permits only one live instance per file per process, and that rule has not gone away —
+ * what changed is who enforces it. Registering this as a Koin `single` gives the same guarantee the
+ * old double-checked `getInstance()` did, with none of the code. Apps that don't use a DI container
+ * still have to enforce it themselves; see the README.
+ *
+ * [appScope] is the second thing worth noticing: fire-and-forget writes (the `*Async` methods, and
+ * every delegate setter) launch in it, so injecting an application-lifetime scope carrying a
+ * `CoroutineExceptionHandler` is what stops a failed background write from reaching the default
+ * handler and taking the process with it.
+ */
+class NormalDataStore(
+	context: Context,
+	appScope: CoroutineScope,
+) : BaseDataStoreHelper(context, "normal_dataStore", scope = appScope) {
 
 	var exampleValue by stringPref(KEY_EXAMPLE, defaultValue = "")
 	val exampleValueFlow = stringPrefFlow(KEY_EXAMPLE)
 
 	companion object {
 		const val KEY_EXAMPLE = "example_key"
-
-		@Volatile
-		private var INSTANCE: NormalDataStore? = null
-		fun getInstance(context: Context) =
-			INSTANCE ?: synchronized(this) {
-				INSTANCE ?: NormalDataStore(context).also {
-					INSTANCE = it
-				}
-			}
 	}
 }
