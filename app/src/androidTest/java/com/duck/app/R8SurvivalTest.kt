@@ -1,7 +1,6 @@
 package com.duck.app
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
 import com.duck.app.data.prefs.Feature
 import com.duck.app.data.prefs.NormalDataStore
 import com.duck.app.data.prefs.NormalPrefs
@@ -27,9 +26,10 @@ import java.util.Date
  * ./gradlew :app:connectedAndroidTest -PminifiedTests
  * ```
  *
- * Without `-PminifiedTests` this runs against the debug build and proves nothing about R8; it will
- * still pass, so read the build type before trusting a green result. [testIsActuallyRunningMinified]
- * fails loudly if the app under test was not minified.
+ * Without `-PminifiedTests` this runs against the debug build, where every round-trip below would
+ * pass while proving nothing about R8. [testIsActuallyRunningMinified] exists to stop that being a
+ * silent false green: it asks the runtime whether its own class was renamed and fails the run if
+ * not, so a debug invocation reports failure rather than success.
  *
  * The classes exercised here (`NormalPrefs`, `NormalDataStore`, `Theme`, `Feature`) live in the
  * app's **main** source set precisely so R8 processes them. A helper declared in this test source
@@ -160,11 +160,5 @@ class R8SurvivalTest {
 			actual = read()
 		}
 		assertEquals(expected, actual)
-	}
-
-	private companion object {
-		init {
-			InstrumentationRegistry.getInstrumentation()
-		}
 	}
 }

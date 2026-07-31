@@ -870,7 +870,9 @@ abstract class BasePrefsHelper(
 	/**
 	 * Create a property delegate for a nullable [Enum] preference.
 	 *
-	 * Returns null when the key is absent or cannot be parsed. Assigning null clears the stored value.
+	 * Returns null when the key is absent or cannot be parsed. Assigning null removes the key, as of
+	 * 2.0 — earlier versions left an empty string behind, which read back as null but kept
+	 * [contains] returning true.
 	 */
 	protected inline fun <reified T : Enum<*>> enumPref(key: String): ReadWriteProperty<Any?, T?> {
 		val constants = T::class.java.enumConstants
