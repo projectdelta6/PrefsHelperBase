@@ -537,8 +537,9 @@ abstract class BasePrefsHelper(
 	 * @param default The value to return if the key does not exist, defaults to an empty set
 	 */
 	inline fun <reified T : Enum<*>> getEnumSet(key: String, default: Set<T> = emptySet()): Set<T> {
+		// Absent and "stored, but empty" are different answers: only the former is the default.
+		if (!contains(key)) return default
 		val names = getStringSet(key, emptySet())
-		if (names.isEmpty()) return default
 		return try {
 			val constants = T::class.java.enumConstants ?: return default
 			names.mapNotNullTo(LinkedHashSet()) { name -> constants.firstOrNull { it.name == name } }
@@ -870,8 +871,9 @@ abstract class BasePrefsHelper(
 		val constants = T::class.java.enumConstants
 		return object : ReadWriteProperty<Any?, Set<T>> {
 			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<T> {
+				// Absent and "stored, but empty" are different answers — see [getEnumSet].
+				if (!contains(key)) return defaultValue
 				val names = getStringSet(key, emptySet())
-				if (names.isEmpty()) return defaultValue
 				return names.mapNotNullTo(LinkedHashSet()) { name -> constants?.firstOrNull { it.name == name } }
 			}
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<T>) = setEnumSet(key, value)

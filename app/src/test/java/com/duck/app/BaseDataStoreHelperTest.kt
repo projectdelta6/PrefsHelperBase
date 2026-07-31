@@ -1269,6 +1269,26 @@ class BaseDataStoreHelperTest {
 		assertNull(dataStoreHelper.testReadStringSetValue("null_enum_set"))
 	}
 
+	/**
+	 * Parity guard against `BasePrefsHelper`: a stored empty set is not the same as an absent key,
+	 * so it must win over a non-empty default. `BasePrefsHelper.getEnumSet` originally got this
+	 * wrong by testing `isEmpty()` instead of key presence.
+	 */
+	@Test
+	fun testEmptyEnumSetBeatsNonEmptyDefault() = runBlocking {
+		val default = setOf(TestEnum.VALUE_A)
+
+		// Absent -> default.
+		assertEquals(default, dataStoreHelper.testReadEnumSetValue("absent_enum_set", default))
+
+		// Stored empty -> empty, not the default.
+		dataStoreHelper.testWriteEnumSet("stored_empty_enum_set", emptySet())
+		assertEquals(
+			emptySet<TestEnum>(),
+			dataStoreHelper.testReadEnumSetValue("stored_empty_enum_set", default),
+		)
+	}
+
 	@Test
 	fun testReadEnumSetFlow() = runBlocking {
 		dataStoreHelper.testWriteEnumSet("enum_set_flow_key", setOf(TestEnum.VALUE_B))

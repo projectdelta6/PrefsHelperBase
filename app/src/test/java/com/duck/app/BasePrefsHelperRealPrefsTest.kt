@@ -362,6 +362,33 @@ class BasePrefsHelperRealPrefsTest {
 		)
 	}
 
+	/**
+	 * A stored empty set must not be confused with an absent key — otherwise an empty selection is
+	 * unstorable whenever the default is non-empty, and this helper disagrees with
+	 * `BaseDataStoreHelper`, which distinguishes the two.
+	 */
+	@Test
+	fun testEmptyEnumSetIsDistinctFromAbsent() {
+		val withDefault = EnumSetDefaultHelper(prefs)
+
+		// Absent -> the default.
+		assertEquals(setOf(BasePrefsHelperTest.TestEnum.VALUE_A), withDefault.features)
+
+		// Explicitly stored empty -> empty, NOT the default.
+		withDefault.features = emptySet()
+		assertEquals(emptySet<BasePrefsHelperTest.TestEnum>(), withDefault.features)
+
+		// Same distinction on the direct accessor.
+		assertEquals(
+			emptySet<BasePrefsHelperTest.TestEnum>(),
+			helper.getEnumSet("features", setOf(BasePrefsHelperTest.TestEnum.VALUE_A)),
+		)
+		assertEquals(
+			setOf(BasePrefsHelperTest.TestEnum.VALUE_A),
+			helper.getEnumSet("never_written_enum_set", setOf(BasePrefsHelperTest.TestEnum.VALUE_A)),
+		)
+	}
+
 	/** Names that no longer map to a constant are dropped, not thrown on. */
 	@Test
 	fun testEnumSetDropsUnknownStoredNames() {
@@ -378,5 +405,12 @@ class BasePrefsHelperRealPrefsTest {
 	) : BasePrefsHelper() {
 		var byteArrayValue by byteArrayPref("byte_array_key")
 		var enumSetValue by enumSetPref<BasePrefsHelperTest.TestEnum>("enum_set_key")
+	}
+
+	/** A delegate with a non-empty default, to expose empty-vs-absent confusion. */
+	private class EnumSetDefaultHelper(
+		override val sharedPreferences: SharedPreferences,
+	) : BasePrefsHelper() {
+		var features by enumSetPref("features", defaultValue = setOf(BasePrefsHelperTest.TestEnum.VALUE_A))
 	}
 }

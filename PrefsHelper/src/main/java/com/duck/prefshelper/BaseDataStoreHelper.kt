@@ -632,8 +632,8 @@ abstract class BaseDataStoreHelper(
 	/**
 	 * Add [Date] to the data store
 	 *
-	 * Stored as epoch milliseconds in a [Long]. If value is null, the key will be removed — note
-	 * this differs from `BasePrefsHelper`, which writes a -1L sentinel for temporal types.
+	 * Stored as epoch milliseconds in a [Long]. If value is null, the key will be removed, matching
+	 * `BasePrefsHelper` — which used to write a -1L sentinel here, but stopped doing so in 2.0.
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store

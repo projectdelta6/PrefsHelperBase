@@ -225,6 +225,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetEnumSet() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
 		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(linkedSetOf("VALUE_A", "VALUE_C"))
 		assertEquals(setOf(TestEnum.VALUE_A, TestEnum.VALUE_C), prefsHelper.getEnumSet<TestEnum>("key"))
 	}
@@ -235,6 +236,7 @@ class BasePrefsHelperTest {
 	 */
 	@Test
 	fun testGetEnumSetDropsUnknownNames() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
 		`when`(mockSharedPreferences.getStringSet("key", null))
 			.thenReturn(linkedSetOf("VALUE_A", "REMOVED_IN_A_LATER_VERSION"))
 		assertEquals(setOf(TestEnum.VALUE_A), prefsHelper.getEnumSet<TestEnum>("key"))
@@ -748,6 +750,7 @@ class BasePrefsHelperTest {
 	// Enum set delegate
 	@Test
 	fun testEnumSetPrefDelegateGet() {
+		`when`(mockSharedPreferences.contains("enum_set_key")).thenReturn(true)
 		`when`(mockSharedPreferences.getStringSet("enum_set_key", null))
 			.thenReturn(linkedSetOf("VALUE_B", "VALUE_C"))
 		assertEquals(setOf(TestEnum.VALUE_B, TestEnum.VALUE_C), prefsHelper.enumSetValue)
