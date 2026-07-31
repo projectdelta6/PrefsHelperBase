@@ -74,9 +74,13 @@ class BaseDataStoreHelperInjectionTest {
 	private fun newDataStore(testScheduler: TestCoroutineScheduler): DataStore<Preferences> {
 		val storeScope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job())
 		storeScopes += storeScope
+		// Resolve the path up front and close over it: produceFile is contractually required to
+		// yield the same file every time. Calling newPreferencesFile() inside the lambda would
+		// hand DataStore a different path on any second invocation.
+		val file = newPreferencesFile()
 		return PreferenceDataStoreFactory.create(
 			scope = storeScope,
-			produceFile = { newPreferencesFile() },
+			produceFile = { file },
 		)
 	}
 
@@ -247,6 +251,10 @@ class BaseDataStoreHelperInjectionTest {
 
 		assertNull(helper.testReadStringFlow("clear_key").first())
 	}
+
+	// endregion
+
+	// region 4b — Suspending writes are caller-cancellable
 
 	/**
 	 * The redesign's claim is that `clearPrefs` *and the suspending writes* became caller-cancellable,

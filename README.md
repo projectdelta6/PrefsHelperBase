@@ -123,11 +123,14 @@ Then, in a test:
 @get:Rule val tempFolder = TemporaryFolder()
 private var fileCount = 0
 
+// Resolve the path up front and close over it — produceFile must yield the same
+// file every time. Not tempFolder.newFile(...): that pre-creates the file and
+// throws if it's ever invoked twice.
+val file = File(tempFolder.root, "test_${fileCount++}.preferences_pb")
+
 val store = PreferenceDataStoreFactory.create(
     scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job()),
-    // Not tempFolder.newFile(...) — that pre-creates the file, and throws if
-    // produceFile is ever invoked twice. Hand DataStore a path it owns.
-    produceFile = { File(tempFolder.root, "test_${fileCount++}.preferences_pb") },
+    produceFile = { file },
 )
 val prefs = AppPrefs(store, StandardTestDispatcher(testScheduler), backgroundScope)
 ```
