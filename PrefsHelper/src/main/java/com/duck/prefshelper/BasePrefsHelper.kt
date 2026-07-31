@@ -2,12 +2,14 @@ package com.duck.prefshelper
 
 import android.content.SharedPreferences
 import android.os.Build
+import android.util.Base64
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -146,6 +148,57 @@ abstract class BasePrefsHelper(
 	}
 
 	/**
+	 * Set a [Float] preference
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	fun setFloat(key: String, value: Float) {
+		sharedPreferences.edit {
+			putFloat(key, value)
+		}
+	}
+
+	/**
+	 * Get a [Float] preference
+	 *
+	 * @param key The key to get the value for
+	 * @param defValue The default value to return if the key does not exist, defaults to 0f
+	 */
+	fun getFloat(key: String, defValue: Float = 0f): Float {
+		return sharedPreferences.getFloat(key, defValue)
+	}
+
+	/**
+	 * Set a [Set] of [String] preference
+	 *
+	 * A copy is stored rather than the caller's instance: [SharedPreferences] keeps a reference to
+	 * the set it is handed, and mutating it afterwards corrupts the stored value.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	fun setStringSet(key: String, value: Set<String>) {
+		sharedPreferences.edit {
+			putStringSet(key, LinkedHashSet(value))
+		}
+	}
+
+	/**
+	 * Get a [Set] of [String] preference
+	 *
+	 * Returns a defensive copy. [SharedPreferences.getStringSet] documents its result as one you
+	 * must not modify, with undefined behaviour if you do — this returns a set you own instead.
+	 *
+	 * @param key The key to get the value for
+	 * @param defValue The default value to return if the key does not exist, defaults to an empty set
+	 */
+	fun getStringSet(key: String, defValue: Set<String> = emptySet()): Set<String> {
+		val stored = sharedPreferences.getStringSet(key, null) ?: return defValue
+		return LinkedHashSet(stored)
+	}
+
+	/**
 	 * Set a [Date] preference
 	 *
 	 * @param key The key to store the value under
@@ -166,6 +219,65 @@ abstract class BasePrefsHelper(
 	fun getDate(key: String): Date? {
 		val time = sharedPreferences.getLong(key, -1L)
 		return if(time == -1L) null else Date(time)
+	}
+
+	/**
+	 * Set an [Instant] preference
+	 *
+	 * Stored as epoch milliseconds, using the same -1L sentinel as the other temporal types here.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	fun setInstant(key: String, value: Instant?) {
+		sharedPreferences.edit {
+			putLong(key, value?.toEpochMilli() ?: -1L)
+		}
+	}
+
+	/**
+	 * Get an [Instant] preference
+	 *
+	 * @param key The key to get the value for
+	 * @return The Instant stored under the key, or null if the key does not exist or the value is null
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	fun getInstant(key: String): Instant? {
+		val millis = sharedPreferences.getLong(key, -1L)
+		return if (millis == -1L) null else Instant.ofEpochMilli(millis)
+	}
+
+	/**
+	 * Set a [ByteArray] preference
+	 *
+	 * [SharedPreferences] has no binary type, so the value is stored Base64-encoded
+	 * ([Base64.NO_WRAP]) in a [String]. Assigning null removes the key.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store, or null to remove the key
+	 */
+	fun setByteArray(key: String, value: ByteArray?) {
+		sharedPreferences.edit {
+			if (value == null) remove(key) else putString(key, Base64.encodeToString(value, Base64.NO_WRAP))
+		}
+	}
+
+	/**
+	 * Get a [ByteArray] preference
+	 *
+	 * @param key The key to get the value for
+	 * @return The bytes stored under the key, or null if the key does not exist or the stored value
+	 * is not valid Base64
+	 */
+	fun getByteArray(key: String): ByteArray? {
+		val encoded = sharedPreferences.getString(key, null) ?: return null
+		return try {
+			Base64.decode(encoded, Base64.NO_WRAP)
+		} catch (e: IllegalArgumentException) {
+			Log.w("BasePrefsHelper", "Could not decode Base64 ByteArray for \"$key\"", e)
+			null
+		}
 	}
 
 	/**
@@ -273,6 +385,39 @@ abstract class BasePrefsHelper(
 	 */
 	fun setEnum(key: String, value: Enum<*>?) {
 		setString(key, value?.name ?: "")
+	}
+
+	/**
+	 * Set a [Set] of [Enum] preference
+	 *
+	 * Stored as a set of [Enum.name] values.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	fun setEnumSet(key: String, value: Set<Enum<*>>) {
+		setStringSet(key, value.mapTo(LinkedHashSet()) { it.name })
+	}
+
+	/**
+	 * Get a [Set] of [Enum] preference
+	 *
+	 * Stored names that no longer match a constant of [T] are dropped rather than throwing, so
+	 * removing an enum constant does not break reads of previously stored data.
+	 *
+	 * @param key The key to get the value for
+	 * @param default The value to return if the key does not exist, defaults to an empty set
+	 */
+	inline fun <reified T : Enum<*>> getEnumSet(key: String, default: Set<T> = emptySet()): Set<T> {
+		val names = getStringSet(key, emptySet())
+		if (names.isEmpty()) return default
+		return try {
+			val constants = T::class.java.enumConstants ?: return default
+			names.mapNotNullTo(LinkedHashSet()) { name -> constants.firstOrNull { it.name == name } }
+		} catch (e: Exception) {
+			Log.w("BasePrefsHelper", "Could not get Enum set of ${T::class.simpleName} for \"$key\"", e)
+			default
+		}
 	}
 
 	/**
@@ -400,6 +545,69 @@ abstract class BasePrefsHelper(
 		}
 
 	/**
+	 * Create a property delegate for a [Float] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun floatPref(key: String, defaultValue: Float): ReadWriteProperty<Any?, Float> =
+		object : ReadWriteProperty<Any?, Float> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Float = getFloat(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Float) = setFloat(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Float] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun floatPref(key: String): ReadWriteProperty<Any?, Float?> =
+		object : ReadWriteProperty<Any?, Float?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Float? =
+				if (contains(key)) getFloat(key) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Float?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setFloat(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a [Set] of [String] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun stringSetPref(key: String, defaultValue: Set<String>): ReadWriteProperty<Any?, Set<String>> =
+		object : ReadWriteProperty<Any?, Set<String>> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<String> = getStringSet(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<String>) = setStringSet(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Set] of [String] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun stringSetPref(key: String): ReadWriteProperty<Any?, Set<String>?> =
+		object : ReadWriteProperty<Any?, Set<String>?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<String>? =
+				if (contains(key)) getStringSet(key) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<String>?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setStringSet(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a [ByteArray] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun byteArrayPref(key: String): ReadWriteProperty<Any?, ByteArray?> =
+		object : ReadWriteProperty<Any?, ByteArray?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): ByteArray? = getByteArray(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: ByteArray?) = setByteArray(key, value)
+		}
+
+	/**
 	 * Create a property delegate for a [Boolean] preference.
 	 *
 	 * @param key The key to read/write the value for
@@ -423,6 +631,18 @@ abstract class BasePrefsHelper(
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Boolean?) {
 				if (value == null) sharedPreferences.edit { remove(key) } else setBoolean(key, value)
 			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Instant] preference.
+	 *
+	 * Assigning null stores the -1L sentinel (matching [setInstant]/[getInstant]).
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun instantPref(key: String): ReadWriteProperty<Any?, Instant?> =
+		object : ReadWriteProperty<Any?, Instant?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Instant? = getInstant(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Instant?) = setInstant(key, value)
 		}
 
 	/**
@@ -504,6 +724,29 @@ abstract class BasePrefsHelper(
 				else constants?.firstOrNull { it.name == value }
 			}
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: T?) = setEnum(key, value)
+		}
+	}
+
+	/**
+	 * Create a property delegate for a [Set] of [Enum] preference.
+	 *
+	 * Stored names that no longer match a constant of [T] are dropped on read.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected inline fun <reified T : Enum<*>> enumSetPref(
+		key: String,
+		defaultValue: Set<T> = emptySet(),
+	): ReadWriteProperty<Any?, Set<T>> {
+		val constants = T::class.java.enumConstants
+		return object : ReadWriteProperty<Any?, Set<T>> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<T> {
+				val names = getStringSet(key, emptySet())
+				if (names.isEmpty()) return defaultValue
+				return names.mapNotNullTo(LinkedHashSet()) { name -> constants?.firstOrNull { it.name == name } }
+			}
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<T>) = setEnumSet(key, value)
 		}
 	}
 }

@@ -168,19 +168,24 @@ class PrefsHelper(context: Context) {
 
 `BasePrefsHelper` and `BaseDataStoreHelper` support the same set of types as of 2.0:
 
-`String`, `Int`, `Long`, `Double`, `Boolean`, `Date`, `LocalDateTime`, `LocalDate`, `LocalTime`, and `Enum<*>`.
+`String`, `Int`, `Long`, `Float`, `Double`, `Boolean`, `ByteArray`, `Set<String>`, `Date`, `Instant`, `LocalDateTime`, `LocalDate`, `LocalTime`, `Enum<*>`, and `Set<Enum>`.
 
-Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)`. `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads.
+Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)`. `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads. The `java.time` types require API 26 (`@RequiresApi(O)`), as they did before.
 
-The types match, but the two backends still store and clear them differently — that's inherent to `SharedPreferences` versus `DataStore`, not an oversight:
+The types match, but the two backends store and clear some of them differently — inherent to `SharedPreferences` versus `DataStore`, not an oversight:
 
 | | `BasePrefsHelper` | `BaseDataStoreHelper` |
 |---|---|---|
-| Assigning `null` | Removes the key for `String`/`Int`/`Long`/`Double`/`Boolean`; writes a `-1L` sentinel for the temporal types | Always removes the key |
-| `Double` storage | Raw IEEE-754 bits in a `Long` — `SharedPreferences` has no double primitive, so never read the key back with `getLong` | Native `doublePreferencesKey` |
-| `Date` storage | Epoch millis, with `-1L` doubling as "absent" | Epoch millis in a `Long`, absent means absent |
+| Assigning `null` | Removes the key for the non-temporal types; writes a `-1L` sentinel for `Date`/`Instant`/`LocalDateTime`/`LocalDate`/`LocalTime` | Always removes the key |
+| `Double` | Raw IEEE-754 bits in a `Long` — `SharedPreferences` has no double primitive, so never read that key back with `getLong` | Native `doublePreferencesKey` |
+| `ByteArray` | Base64 (`NO_WRAP`) in a `String`; undecodable data reads back as null | Native `byteArrayPreferencesKey` |
+| `Date` / `Instant` | Epoch millis, with `-1L` doubling as "absent" | Epoch millis in a `Long`; absent means absent |
+| `Set<String>` | Defensive copy on both read and write, so neither side can be corrupted by later mutation | Immutable set from DataStore |
 
-That last row matters if you store pre-epoch dates: `BasePrefsHelper` cannot distinguish `Date(-1L)` from null, `BaseDataStoreHelper` can.
+Two consequences worth knowing:
+
+- **Pre-epoch timestamps.** `BasePrefsHelper` cannot distinguish `Date(-1L)` / `Instant.ofEpochMilli(-1)` from null; `BaseDataStoreHelper` can. If you store timestamps that could legitimately be 1ms before the epoch, use the DataStore helper.
+- **`Set<Enum>` tolerates deleted constants.** Stored names that no longer match a constant are dropped on read rather than throwing, on both helpers — so removing an enum value doesn't break existing installs.
 
 ## Migrating to 2.0
 
@@ -259,7 +264,9 @@ The convenience constructor deliberately keeps the store's own internal actor on
 
 ### 7. New, not breaking: the two helpers now support the same types
 
-`BasePrefsHelper` gains `Double`, `BaseDataStoreHelper` gains `Date`. Nothing existing changes — these are additions, and both follow their helper's established conventions. See [Supported types](#supported-types) for the storage differences that remain between the two backends.
+2.0 closes the gap where each helper supported types the other didn't, and adds several new ones. `BasePrefsHelper` gains `Double`, `Float`, `ByteArray`, `Set<String>`, `Instant` and `Set<Enum>`; `BaseDataStoreHelper` gains `Date`, `Float`, `ByteArray`, `Set<String>`, `Instant` and `Set<Enum>`.
+
+Nothing existing changes — these are additions, and each follows its helper's established conventions. See [Supported types](#supported-types) for the storage differences that remain between the two backends.
 
 ## R8 / ProGuard / Minification
 

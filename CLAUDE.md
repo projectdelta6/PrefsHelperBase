@@ -57,15 +57,20 @@ The library provides two abstract base classes that consumers extend:
 - Null values remove the key from storage
 - Preferred usage is the `*Pref` delegate + `*PrefFlow` alias pair (e.g. `var userId by intPref(KEY, defaultValue = -1)` paired with `val userIdFlow = intPrefFlow(KEY, defaultValue = -1)`). Delegate setters route through the existing `*Async` writes so callers don't need to build their own `CoroutineScope`.
 
-Both classes support the same types as of 2.0: `String`, `Int`, `Long`, `Double`, `Boolean`, `Date`, `LocalDateTime`, `LocalDate`, `LocalTime`, `Enum<*>`.
+Both classes support the same types as of 2.0: `String`, `Int`, `Long`, `Float`, `Double`, `Boolean`, `ByteArray`, `Set<String>`, `Date`, `Instant`, `LocalDateTime`, `LocalDate`, `LocalTime`, `Enum<*>`, `Set<Enum>`.
 
 Storage conventions still differ by backend, and deliberately so:
 - **`Double` on `BasePrefsHelper`** is stored as raw IEEE-754 bits via `putLong`/`Double.fromBits`, because `SharedPreferences` has no double primitive. Reading that key with `getLong` returns the bit pattern, not the number.
-- **`Date` on `BaseDataStoreHelper`** is epoch millis in a `longPreferencesKey`, and null removes the key — unlike `BasePrefsHelper`, whose temporal types use the `-1L` sentinel and therefore cannot represent `Date(-1L)` distinctly from null.
+- **`ByteArray` on `BasePrefsHelper`** is Base64 (`NO_WRAP`) in a String, since SharedPreferences has no binary type. Undecodable data logs and returns null rather than throwing.
+- **`Set<String>` on `BasePrefsHelper`** copies on both read and write. `SharedPreferences.getStringSet` documents its result as one callers must not modify, and the platform keeps a reference to the set it is handed — both directions are trapped, so both are copied.
+- **`Date`/`Instant` on `BaseDataStoreHelper`** are epoch millis in a `longPreferencesKey` and null removes the key — unlike `BasePrefsHelper`, whose temporal types use the `-1L` sentinel and therefore cannot represent `-1L` millis distinctly from null.
+- **`Set<Enum>`** is stored as a set of `Enum.name` on both. Unknown names are dropped on read so deleting an enum constant doesn't break existing installs.
 
 ## Gotchas
 
-- **Inline reified factories that access `protected` members**: an `inline fun <reified T>` that returns an anonymous object (e.g. a `ReadWriteProperty`) calling `protected` methods on `BaseDataStoreHelper` throws `IllegalAccessError` at runtime — the anonymous class is emitted inside the *subclass* at inline time, losing JVM-level protected access. Fix: split into a thin `inline` + `reified` wrapper that forwards to a non-inline `@PublishedApi internal` helper which owns the anonymous object. See `enumPref` / `enumPrefInternal` in `BaseDataStoreHelper.kt`. `BasePrefsHelper` is unaffected because its get/set accessors are `public`.
+- **Inline reified factories that access `protected` members**: an `inline fun <reified T>` that returns an anonymous object (e.g. a `ReadWriteProperty`) calling `protected` methods on `BaseDataStoreHelper` throws `IllegalAccessError` at runtime — the anonymous class is emitted inside the *subclass* at inline time, losing JVM-level protected access. Fix: split into a thin `inline` + `reified` wrapper that forwards to a non-inline `@PublishedApi internal` helper which owns the anonymous object. See `enumPref` / `enumPrefInternal` and `enumSetPref` / `enumSetPrefInternal` in `BaseDataStoreHelper.kt`. `BasePrefsHelper` is unaffected because its get/set accessors are `public`.
+
+This only reproduces when the delegate is used **from a subclass in another module**, which is why `BaseDataStoreHelperTest`'s `TestDataStoreHelper` (in `:app`) declares `delegate`-prefixed properties for both enum delegates. A test that calls `readEnumSetValue` directly will not catch a regression here.
 
 - **Tests are JVM-only (Robolectric), not instrumented**: all three test classes live in `app/src/test` (`BasePrefsHelperTest`, `BaseDataStoreHelperTest`, and `BaseDataStoreHelperInjectionTest`). `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
 

@@ -131,6 +131,121 @@ class BasePrefsHelperTest {
 	}
 
 	@Test
+	fun testSetFloat() {
+		prefsHelper.setFloat("key", 1.5f)
+		verify(mockEditor).putFloat("key", 1.5f)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testGetFloat() {
+		`when`(mockSharedPreferences.getFloat("key", 0f)).thenReturn(2.5f)
+		assertEquals(2.5f, prefsHelper.getFloat("key"), 0f)
+	}
+
+	@Test
+	fun testSetStringSet() {
+		prefsHelper.setStringSet("key", setOf("a", "b"))
+		verify(mockEditor).putStringSet("key", linkedSetOf("a", "b"))
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testGetStringSet() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(linkedSetOf("a", "b"))
+		assertEquals(setOf("a", "b"), prefsHelper.getStringSet("key"))
+	}
+
+	@Test
+	fun testGetStringSetReturnsDefaultWhenAbsent() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(null)
+		assertEquals(setOf("fallback"), prefsHelper.getStringSet("key", setOf("fallback")))
+	}
+
+	/**
+	 * [android.content.SharedPreferences.getStringSet] documents its result as one callers must not
+	 * modify, with undefined behaviour if they do. The helper hands back a copy so callers can't
+	 * fall into that; mutating what we return must not touch what the platform gave us.
+	 */
+	@Test
+	fun testGetStringSetReturnsDefensiveCopy() {
+		val backing = linkedSetOf("a", "b")
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(backing)
+
+		val returned = prefsHelper.getStringSet("key") as MutableSet<String>
+		returned.add("c")
+
+		assertEquals(setOf("a", "b"), backing)
+	}
+
+	/**
+	 * Counterpart to the read side: the platform keeps a reference to the set it is handed, so the
+	 * helper must store a copy rather than the caller's instance.
+	 */
+	@Test
+	fun testSetStringSetStoresDefensiveCopy() {
+		val caller = mutableSetOf("a")
+		prefsHelper.setStringSet("key", caller)
+		caller.add("mutated-after-write")
+
+		verify(mockEditor).putStringSet("key", linkedSetOf("a"))
+	}
+
+	@Test
+	fun testSetInstant() {
+		prefsHelper.setInstant("key", java.time.Instant.ofEpochMilli(1_700_000_000_000L))
+		verify(mockEditor).putLong("key", 1_700_000_000_000L)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testSetInstantNullStoresSentinel() {
+		prefsHelper.setInstant("key", null)
+		verify(mockEditor).putLong("key", -1L)
+	}
+
+	@Test
+	fun testGetInstant() {
+		`when`(mockSharedPreferences.getLong("key", -1L)).thenReturn(1_700_000_000_000L)
+		assertEquals(java.time.Instant.ofEpochMilli(1_700_000_000_000L), prefsHelper.getInstant("key"))
+	}
+
+	@Test
+	fun testGetInstantReturnsNullForSentinel() {
+		`when`(mockSharedPreferences.getLong("key", -1L)).thenReturn(-1L)
+		assertNull(prefsHelper.getInstant("key"))
+	}
+
+	@Test
+	fun testSetEnumSet() {
+		prefsHelper.setEnumSet("key", setOf(TestEnum.VALUE_A, TestEnum.VALUE_B))
+		verify(mockEditor).putStringSet("key", linkedSetOf("VALUE_A", "VALUE_B"))
+	}
+
+	@Test
+	fun testGetEnumSet() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(linkedSetOf("VALUE_A", "VALUE_C"))
+		assertEquals(setOf(TestEnum.VALUE_A, TestEnum.VALUE_C), prefsHelper.getEnumSet<TestEnum>("key"))
+	}
+
+	/**
+	 * Removing an enum constant must not break reads of data stored before the removal — unknown
+	 * names are dropped rather than throwing.
+	 */
+	@Test
+	fun testGetEnumSetDropsUnknownNames() {
+		`when`(mockSharedPreferences.getStringSet("key", null))
+			.thenReturn(linkedSetOf("VALUE_A", "REMOVED_IN_A_LATER_VERSION"))
+		assertEquals(setOf(TestEnum.VALUE_A), prefsHelper.getEnumSet<TestEnum>("key"))
+	}
+
+	@Test
+	fun testGetEnumSetReturnsDefaultWhenAbsent() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(null)
+		assertEquals(setOf(TestEnum.VALUE_B), prefsHelper.getEnumSet("key", setOf(TestEnum.VALUE_B)))
+	}
+
+	@Test
 	fun testGetBoolean() {
 		`when`(mockSharedPreferences.getBoolean("key", false)).thenReturn(true)
 		assertTrue(prefsHelper.getBoolean("key", false))
@@ -544,6 +659,97 @@ class BasePrefsHelperTest {
 		verify(mockEditor).apply()
 	}
 
+	// Float delegate
+	@Test
+	fun testFloatPrefDelegateGet() {
+		`when`(mockSharedPreferences.getFloat("float_key", 0.25f)).thenReturn(7.5f)
+		assertEquals(7.5f, prefsHelper.floatValue, 0f)
+	}
+
+	@Test
+	fun testFloatPrefDelegateSet() {
+		prefsHelper.floatValue = 3.5f
+		verify(mockEditor).putFloat("float_key", 3.5f)
+	}
+
+	@Test
+	fun testNullableFloatPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_float_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableFloat)
+	}
+
+	@Test
+	fun testNullableFloatPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableFloat = null
+		verify(mockEditor).remove("nullable_float_key")
+	}
+
+	// String set delegate
+	@Test
+	fun testStringSetPrefDelegateGet() {
+		`when`(mockSharedPreferences.getStringSet("string_set_key", null)).thenReturn(linkedSetOf("x", "y"))
+		assertEquals(setOf("x", "y"), prefsHelper.stringSetValue)
+	}
+
+	@Test
+	fun testStringSetPrefDelegateFallsBackToDefault() {
+		`when`(mockSharedPreferences.getStringSet("string_set_key", null)).thenReturn(null)
+		assertEquals(setOf("default"), prefsHelper.stringSetValue)
+	}
+
+	@Test
+	fun testStringSetPrefDelegateSet() {
+		prefsHelper.stringSetValue = setOf("p", "q")
+		verify(mockEditor).putStringSet("string_set_key", linkedSetOf("p", "q"))
+	}
+
+	@Test
+	fun testNullableStringSetPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_string_set_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableStringSet)
+	}
+
+	@Test
+	fun testNullableStringSetPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableStringSet = null
+		verify(mockEditor).remove("nullable_string_set_key")
+	}
+
+	// Instant delegate
+	@Test
+	fun testInstantPrefDelegateGet() {
+		`when`(mockSharedPreferences.getLong("instant_key", -1L)).thenReturn(1_234_567L)
+		assertEquals(java.time.Instant.ofEpochMilli(1_234_567L), prefsHelper.instantValue)
+	}
+
+	@Test
+	fun testInstantPrefDelegateSet() {
+		prefsHelper.instantValue = java.time.Instant.ofEpochMilli(99L)
+		verify(mockEditor).putLong("instant_key", 99L)
+	}
+
+	// Enum set delegate
+	@Test
+	fun testEnumSetPrefDelegateGet() {
+		`when`(mockSharedPreferences.getStringSet("enum_set_key", null))
+			.thenReturn(linkedSetOf("VALUE_B", "VALUE_C"))
+		assertEquals(setOf(TestEnum.VALUE_B, TestEnum.VALUE_C), prefsHelper.enumSetValue)
+	}
+
+	@Test
+	fun testEnumSetPrefDelegateSet() {
+		prefsHelper.enumSetValue = setOf(TestEnum.VALUE_A)
+		verify(mockEditor).putStringSet("enum_set_key", linkedSetOf("VALUE_A"))
+	}
+
+	// ByteArray delegate (encoding itself is covered against a real SharedPreferences in
+	// BasePrefsHelperRealPrefsTest — android.util.Base64 is not available to these plain-JVM mocks)
+	@Test
+	fun testByteArrayPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.byteArrayValue = null
+		verify(mockEditor).remove("byte_array_key")
+	}
+
 	// Boolean delegate
 	@Test
 	fun testBooleanPrefDelegateGet() {
@@ -689,6 +895,13 @@ class BasePrefsHelperTest {
 		var nullableLong by longPref("nullable_long_key")
 		var doubleValue by doublePref("double_key", defaultValue = 1.5)
 		var nullableDouble by doublePref("nullable_double_key")
+		var floatValue by floatPref("float_key", defaultValue = 0.25f)
+		var nullableFloat by floatPref("nullable_float_key")
+		var stringSetValue by stringSetPref("string_set_key", defaultValue = setOf("default"))
+		var nullableStringSet by stringSetPref("nullable_string_set_key")
+		var byteArrayValue by byteArrayPref("byte_array_key")
+		var instantValue by instantPref("instant_key")
+		var enumSetValue by enumSetPref<TestEnum>("enum_set_key")
 		var boolValue by booleanPref("bool_key", defaultValue = true)
 		var nullableBool by booleanPref("nullable_bool_key")
 		var dateValue by datePref("date_delegate_key")
