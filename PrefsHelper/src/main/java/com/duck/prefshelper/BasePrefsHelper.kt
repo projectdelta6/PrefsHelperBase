@@ -46,10 +46,28 @@ abstract class BasePrefsHelper(
 	protected abstract val sharedPreferences: SharedPreferences
 
 	/**
-	 * Clear all preferences
+	 * Clear all preferences.
+	 *
+	 * The [KEY_HELPER_VERSION] stamp written by [migrateIfNeeded] is deliberately preserved: it is
+	 * schema metadata, not user state. Clearing it would leave the file non-empty and unstamped as
+	 * soon as anything was written afterwards, which [migrateIfNeeded] reads as a pre-versioning
+	 * install — re-running every migration on the next cold start. Harmless for an idempotent
+	 * migration, corrupting for exactly the non-idempotent ones the version stamp exists to protect.
+	 *
+	 * `Editor.clear()` is applied before any put in the same edit regardless of call order, so the
+	 * stamp is restored atomically rather than in a second commit.
 	 */
 	open suspend fun clearPrefs(): Unit = withContext(dispatcher) {
-		sharedPreferences.edit(commit = true) { clear() }
+		val version =
+			if (sharedPreferences.contains(KEY_HELPER_VERSION)) {
+				sharedPreferences.getInt(KEY_HELPER_VERSION, VERSION_LEGACY)
+			} else {
+				null
+			}
+		sharedPreferences.edit(commit = true) {
+			clear()
+			if (version != null) putInt(KEY_HELPER_VERSION, version)
+		}
 	}
 
 	/**
@@ -150,12 +168,17 @@ abstract class BasePrefsHelper(
 	 * }
 	 * ```
 	 *
-	 * Only needed for installs that ran a pre-2.0 version. New installs can skip it, and it is safe
-	 * to leave in place indefinitely.
+	 * Only needed for installs that ran a pre-2.0 version.
 	 *
-	 * Note the flip side: a genuine `-1L` written by 2.0 — `Date(-1)`, or `LocalDate` of
-	 * `1969-12-31` — would also be removed. Don't pass keys whose real value could legitimately be
-	 * `-1L`, and drop the call once your install base has turned over.
+	 * **Keep the call inside a [migrateIfNeeded] branch permanently** rather than deleting it once
+	 * your install base turns over. Guarded that way it runs once per install and never sees data
+	 * written by 2.0. Called bare from `init`, it re-examines those keys on every construction
+	 * forever — and a genuine `-1L` written by 2.0 (a `Date(-1)`, or a [LocalDate] of `1969-12-31`)
+	 * would then be deleted as though it were a stale sentinel.
+	 *
+	 * List every temporal key the helper owns: the sweep is per-key on purpose, since scanning the
+	 * whole file for `-1L` would destroy unrelated `Long` preferences that legitimately hold `-1`.
+	 * A key you forget stays broken silently, surfacing as a 1969 date rather than an error.
 	 *
 	 * @param keys The temporal preference keys to sweep
 	 * @return The keys that were actually removed
@@ -512,7 +535,12 @@ abstract class BasePrefsHelper(
 	 * @param value The value to store
 	 */
 	fun setEnum(key: String, value: Enum<*>?) {
-		setString(key, value?.name ?: "")
+		// Removes rather than writing "" so null means the same thing here as everywhere else, and
+		// as it does on BaseDataStoreHelper. Pre-2.0 this left an empty string behind, which read
+		// back as null but made contains(key) disagree between the two helpers.
+		sharedPreferences.edit {
+			if (value == null) remove(key) else putString(key, value.name)
+		}
 	}
 
 	/**

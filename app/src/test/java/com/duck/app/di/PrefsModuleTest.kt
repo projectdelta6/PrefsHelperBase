@@ -9,6 +9,7 @@ import com.duck.app.data.prefs.NormalPrefs
 import com.duck.app.data.prefs.PrefsHelper
 import kotlinx.coroutines.CoroutineScope
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -62,14 +63,31 @@ class PrefsModuleTest : KoinTest {
 		assertSame(get<NormalDataStore>(), get<NormalDataStore>())
 	}
 
-	/** The façade must be handed the same instances the container holds, not fresh ones. */
+	/**
+	 * The façade must be wired to the container's instances, not fresh ones.
+	 *
+	 * Asserting `get<PrefsHelper>() === get<PrefsHelper>()` would only prove `PrefsHelper` is itself
+	 * a `single` — it says nothing about what got injected into it. This writes through the façade
+	 * and reads from the separately-resolved sub-helper, which fails if they are different objects
+	 * over different files.
+	 */
 	@Test
-	fun testFacadeSharesTheContainerInstances() {
+	fun testFacadeIsWiredToTheContainerInstances() {
 		start()
 
-		assertSame(get<PrefsHelper>(), get<PrefsHelper>())
-		assertSame(get<NormalPrefs>(), get<NormalPrefs>())
-		assertSame(get<DevicePrefs>(), get<DevicePrefs>())
+		val facade = get<PrefsHelper>()
+		val normalPrefs = get<NormalPrefs>()
+		val dataStore = get<NormalDataStore>()
+
+		facade.exampleNormalValue = "written-through-facade"
+		assertEquals("written-through-facade", normalPrefs.exampleValue)
+
+		normalPrefs.exampleValue = "written-through-sub-helper"
+		assertEquals("written-through-sub-helper", facade.exampleNormalValue)
+
+		// The DataStore helper is the one that must not be duplicated at all.
+		assertSame(dataStore, get<NormalDataStore>())
+		assertSame(facade, get<PrefsHelper>())
 	}
 
 	/** The injected scope is what gives fire-and-forget writes somewhere to report failures. */

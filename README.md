@@ -214,7 +214,16 @@ class PrefsHelper(context: Context) {
 
 `String`, `Int`, `Long`, `Float`, `Double`, `Boolean`, `ByteArray`, `Set<String>`, `Date`, `Instant`, `LocalDateTime`, `LocalDate`, `LocalTime`, `Enum<*>`, and `Set<Enum>`.
 
-Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)`. `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads. The `java.time` types require API 26 (`@RequiresApi(O)`), as they did before.
+Most types expose a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)`. `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads. The `java.time` types require API 26 (`@RequiresApi(O)`), as they did before.
+
+The overload sets aren't identical across the two helpers — a historical shape rather than a rule:
+
+| | `BasePrefsHelper` | `BaseDataStoreHelper` |
+|---|---|---|
+| `Date`, `Instant`, `LocalDateTime`, `LocalDate`, `LocalTime` | nullable only | nullable **and** non-null-with-default |
+| `ByteArray` | nullable only | nullable only |
+| `Set<Enum>` | non-null-with-default only | non-null-with-default only |
+| everything else | both | both |
 
 **Null means the same thing on both helpers as of 2.0:** assigning `null` removes the key, and an absent key reads back as `null`. There is no sentinel value any more — see [migration item 8](#8-the--1l-temporal-sentinel-is-gone) if you are upgrading.
 
@@ -346,7 +355,7 @@ Nothing existing changes — these are additions, and each follows its helper's 
 
 ### 8. The `-1L` temporal sentinel is gone
 
-**This one touches stored data. Read it if you use `Date`, `Instant`, `LocalDateTime`, `LocalDate` or `LocalTime` on `BasePrefsHelper`.**
+**This one touches stored data. Read it if you use `Date`, `LocalDateTime`, `LocalDate` or `LocalTime` on `BasePrefsHelper`.** (`Instant` is new in 2.0, so no 1.x install ever wrote a sentinel for it.)
 
 Before 2.0, assigning `null` to one of those wrote `-1L` rather than removing the key, and any stored `-1L` read back as `null`. 2.0 removes the key instead, matching `BaseDataStoreHelper`.
 
@@ -362,9 +371,13 @@ init {
 }
 ```
 
-`migrateLegacyTemporalSentinels` removes each listed key that currently holds `-1L`, so it reads as `null` exactly as before. It ignores absent keys, other values and non-`Long` keys, so it's safe to run repeatedly — the `migrateIfNeeded` wrapper is belt-and-braces, and worth adopting for the migrations that follow. Drop the call once your install base has turned over.
+`migrateLegacyTemporalSentinels` removes each listed key that currently holds `-1L`, so it reads as `null` exactly as before. It ignores absent keys, other values and non-`Long` keys, so it's safe to run repeatedly.
 
-Don't pass keys whose genuine value could be `-1L`, or you'll delete real data.
+**List every temporal key the helper owns, including ones you rarely read.** The sweep is opt-in per key by design — it deliberately does *not* scan the file for `-1L` longs, because that would delete genuine `Long` preferences that happen to hold `-1`. The cost of that choice is that a key you forget stays broken, silently, and surfaces as a `1969-12-31` date rather than an error. Grep your subclass for every temporal delegate before writing the list.
+
+Conversely, don't pass keys whose genuine value could be `-1L` — a real `Date(-1)` or `LocalDate` of 1969-12-31 written by 2.0 would be deleted.
+
+Keep the call inside the `migrateIfNeeded(from < 2)` branch permanently rather than deleting it later: it then runs once per install and never touches data written by 2.0. A bare `init { migrateLegacyTemporalSentinels(…) }` is the form that stays dangerous, because it re-examines those keys on every construction forever.
 
 `LocalTime` needs no migration: its valid range is 0..86399, so `-1` was never a legal value. Out-of-range stored values now read as `null` instead of throwing.
 

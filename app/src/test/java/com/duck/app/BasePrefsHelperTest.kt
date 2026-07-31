@@ -432,8 +432,10 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testSetNullEnum() {
+		// 2.0: removes the key rather than writing "", so null means the same thing here as on
+		// BaseDataStoreHelper and contains(key) agrees between the two.
 		prefsHelper.setEnum("enum_key", null)
-		verify(mockEditor).putString("enum_key", "")
+		verify(mockEditor).remove("enum_key")
 		verify(mockEditor).apply()
 	}
 
@@ -899,7 +901,7 @@ class BasePrefsHelperTest {
 	@Test
 	fun testNullableEnumPrefDelegateSetNull() {
 		prefsHelper.nullableEnumValue = null
-		verify(mockEditor).putString("nullable_enum_key", "")
+		verify(mockEditor).remove("nullable_enum_key")
 		verify(mockEditor).apply()
 	}
 

@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.duck.prefshelper.BasePrefsHelper
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -353,6 +354,51 @@ class BasePrefsHelperRealPrefsTest {
 		helper.migrateIfNeeded(currentVersion = 0) { }
 	}
 
+	/**
+	 * The version stamp is schema metadata, not user session state, so `clearPrefs()` must not take
+	 * it with them.
+	 *
+	 * Without this, the sample's own shape is a data-corruption path: stamp at v2 → logout calls
+	 * clearPrefs → the helper is a DI singleton so `init` never re-runs → the app writes a
+	 * preference → the file is now non-empty *and* unstamped → next cold start reads that as
+	 * VERSION_LEGACY and re-runs every migration. Fine for the idempotent sentinel sweep, corrupting
+	 * for the non-idempotent migrations `migrateIfNeeded` exists to make safe.
+	 */
+	@Test
+	fun testClearPrefsPreservesTheVersionStamp() = runBlocking {
+		helper.setString("pre_existing", "written by 1.x")
+		helper.migrateIfNeeded(currentVersion = 2) { }
+		assertEquals(2, prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1))
+
+		helper.clearPrefs()
+
+		assertEquals(
+			"clearPrefs must not reset the migration high-water mark",
+			2,
+			prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1),
+		)
+		// User data is still gone — only the stamp survives.
+		assertNull(helper.getString("pre_existing", "").takeIf { it.isNotEmpty() })
+	}
+
+	/** The full logout-then-relaunch sequence, end to end. */
+	@Test
+	fun testMigrationDoesNotRerunAfterClearPrefs() = runBlocking {
+		helper.setString("pre_existing", "written by 1.x")
+
+		var runs = 0
+		helper.migrateIfNeeded(currentVersion = 2) { runs++ }
+		assertEquals(1, runs)
+
+		helper.clearPrefs()
+		helper.setString("written_after_logout", "x")
+
+		// A cold start reconstructs the helper over the same file.
+		RealPrefsHelper(prefs).migrateIfNeeded(currentVersion = 2) { runs++ }
+
+		assertEquals("migration must not re-run after clearPrefs", 1, runs)
+	}
+
 	@Test
 	fun testEnumSetRoundTrips() {
 		helper.enumSetValue = setOf(BasePrefsHelperTest.TestEnum.VALUE_A, BasePrefsHelperTest.TestEnum.VALUE_C)
@@ -387,6 +433,21 @@ class BasePrefsHelperRealPrefsTest {
 			setOf(BasePrefsHelperTest.TestEnum.VALUE_A),
 			helper.getEnumSet("never_written_enum_set", setOf(BasePrefsHelperTest.TestEnum.VALUE_A)),
 		)
+	}
+
+	/**
+	 * Null must remove the key, not leave an empty string behind. Reads coped either way, but
+	 * `contains(key)` did not — it stayed true on this helper and false on `BaseDataStoreHelper`,
+	 * contradicting 2.0's "null means the same thing on both" claim.
+	 */
+	@Test
+	fun testNullEnumRemovesKey() {
+		helper.setEnum("e", BasePrefsHelperTest.TestEnum.VALUE_B)
+		assertTrue(helper.contains("e"))
+
+		helper.setEnum("e", null)
+		assertTrue("null enum must remove the key, not store \"\"", !helper.contains("e"))
+		assertNull(helper.getEnum<BasePrefsHelperTest.TestEnum>("e"))
 	}
 
 	/** Names that no longer map to a constant are dropped, not thrown on. */

@@ -44,7 +44,7 @@ The library provides two abstract base classes that consumers extend:
 - Synchronous API for reads, async writes via `edit {}`
 - Subclasses must provide `sharedPreferences` instance
 - Takes a `dispatcher: CoroutineDispatcher = Dispatchers.IO` (no `Job`), used by `clearPrefs()`. Because the dispatcher carries no Job, `clearPrefs()` is cancelled when its caller is cancelled — this is deliberate, see the 2.0 migration note in the README.
-- Preferred usage is the `*Pref` property delegate factories (e.g. `var flag by booleanPref(KEY, defaultValue = false)`). Each type has a non-nullable overload `(key, defaultValue)` and a nullable overload `(key)`. Temporal types (`Date`, `LocalDateTime`, `LocalDate`, `LocalTime`) are nullable-only and preserve the existing -1L sentinel.
+- Preferred usage is the `*Pref` property delegate factories (e.g. `var flag by booleanPref(KEY, defaultValue = false)`). Most types have a non-nullable overload `(key, defaultValue)` and a nullable overload `(key)`; the temporal types (`Date`, `Instant`, `LocalDateTime`, `LocalDate`, `LocalTime`) and `ByteArray` are nullable-only here, and `enumSetPref` is non-null-with-default only. The `-1L` sentinel those temporal types used is **gone as of 2.0** — null removes the key, see the Migrations section below.
 
 ### BaseDataStoreHelper
 
