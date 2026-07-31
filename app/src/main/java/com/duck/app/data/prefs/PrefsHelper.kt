@@ -26,8 +26,14 @@ class PrefsHelper(
 
 	var lastSeen by normalPrefs::lastSeen
 
+	var theme by normalPrefs::theme
+	var enabledFeatures by normalPrefs::enabledFeatures
+
 	var exampleDataStoreValue by normalDataStore::exampleValue
 	val exampleDataStoreValueFlow = normalDataStore.exampleValueFlow
+
+	var dataStoreTheme by normalDataStore::theme
+	var dataStoreFeatures by normalDataStore::enabledFeatures
 
 	suspend fun clearPrefs() {
 		normalPrefs.clearPrefs()
@@ -55,14 +61,28 @@ class NormalPrefs(context: Context) : BasePrefsHelper() {
 	var exampleValue by stringPref(KEY_EXAMPLE, defaultValue = "")
 	var lastSeen by datePref(KEY_LAST_SEEN)
 
+	/**
+	 * Enum-backed preferences are the library's only reflective path — values are matched by
+	 * [Enum.name] against `enumConstants`. Kept in the sample so the R8 instrumented test has
+	 * production-shaped, minified code to exercise rather than test-only classes.
+	 */
+	var theme by enumPref(KEY_THEME, Theme.SYSTEM)
+	var enabledFeatures by enumSetPref<Feature>(KEY_FEATURES)
+
 	companion object {
 		const val KEY_EXAMPLE = "example_key"
 		const val KEY_LAST_SEEN = "last_seen"
+		const val KEY_THEME = "theme"
+		const val KEY_FEATURES = "enabled_features"
 
 		/** Bump alongside a new branch in the [migrateIfNeeded] block above. */
 		private const val PREFS_VERSION = 2
 	}
 }
+
+enum class Theme { LIGHT, DARK, SYSTEM }
+
+enum class Feature { OFFLINE_MODE, BETA_SEARCH, ANALYTICS }
 
 class DevicePrefs(context: Context) : BasePrefsHelper() {
 	override val sharedPreferences: SharedPreferences =
@@ -96,7 +116,13 @@ class NormalDataStore(
 	var exampleValue by stringPref(KEY_EXAMPLE, defaultValue = "")
 	val exampleValueFlow = stringPrefFlow(KEY_EXAMPLE)
 
+	/** Same reflective path as [NormalPrefs.theme], on the DataStore side. */
+	var theme by enumPref(KEY_THEME, Theme.SYSTEM)
+	var enabledFeatures by enumSetPref<Feature>(KEY_FEATURES)
+
 	companion object {
 		const val KEY_EXAMPLE = "example_key"
+		const val KEY_THEME = "theme"
+		const val KEY_FEATURES = "enabled_features"
 	}
 }

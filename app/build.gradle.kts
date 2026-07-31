@@ -19,13 +19,43 @@ configure<ApplicationExtension> {
 		versionName = "1.0"
 
 		testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+		// Test-APK-only rules. When instrumented tests target the minified release build, AGP
+		// minifies the test APK too, and Espresso's transitive Error Prone annotations reference
+		// javax.lang.model.*, which does not exist on Android. Kept out of proguard-rules.pro on
+		// purpose: the app's own release build needs no keep rules, and that is the claim under test.
+		testProguardFiles("proguard-rules-androidtest.pro")
 	}
 
 	buildTypes {
 		release {
-			isMinifyEnabled = false
+			// On deliberately: the library README promises consumers need no ProGuard rules of
+			// their own, and this is the only place in the repo that puts R8 anywhere near the
+			// library's reflective paths (Enum.name / enumConstants). If this build starts needing
+			// keep rules, that promise is broken.
+			isMinifyEnabled = true
 			proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+			// Debug-signed so the minified build can actually be installed for the manual
+			// instrumented run below. This is a sample app that is never published.
+			signingConfig = signingConfigs.getByName("debug")
+
+			// Harness-only keeps, added ONLY for the instrumented-test run. Kept conditional so
+			// that a plain `assembleRelease` — the shipped configuration — still proves the
+			// library needs no keep rules of its own.
+			if (providers.gradleProperty("minifiedTests").isPresent) {
+				proguardFile("proguard-rules-instrumentation.pro")
+			}
 		}
+	}
+
+	// Instrumented tests normally run against debug, which is not minified and so cannot say
+	// anything about R8. Opt in with -PminifiedTests to point them at the release build instead:
+	//
+	//   ./gradlew :app:connectedAndroidTest -PminifiedTests
+	//
+	// Deliberately not the default and deliberately not in CI — it needs a device, and CI has none.
+	if (providers.gradleProperty("minifiedTests").isPresent) {
+		testBuildType = "release"
 	}
 
 	compileOptions {
@@ -106,6 +136,11 @@ dependencies {
 	testImplementation(libs.robolectric)
 	testImplementation(libs.kotlinx.coroutines.test)
 	testImplementation(libs.koin.test)
+
+	// Instrumented tests exist solely to verify the library survives R8. See testBuildType above.
+	androidTestImplementation(libs.androidx.test.ext.junit)
+	androidTestImplementation(libs.androidx.test.espresso.core)
+	androidTestImplementation(libs.androidx.tracing)
 
 	debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -386,3 +386,19 @@ Keep the call inside the `migrateIfNeeded(from < 2)` branch permanently rather t
 PrefsHelper is fully compatible with R8 (including full mode) and requires **no consumer ProGuard rules** (the shipped `consumer-rules.pro` is intentionally empty). Preference keys are always explicit string arguments you pass to the `*Pref(...)` delegates — they are **never** derived from Kotlin property names via reflection. R8 is free to rename, merge, and repackage your `BasePrefsHelper`/`BaseDataStoreHelper` subclasses and their properties without changing any persisted key. Enum values are stored by `Enum.name` (preserved by R8's default Android rules), so enum prefs survive obfuscation.
 
 The one thing to keep in mind lives in *consumer* code, not the library: pass real string literals as keys. Since keys are explicit strings here, the classic prefs-library footgun (key derived from a renamed identifier) doesn't apply.
+
+### How that claim is verified
+
+It isn't taken on trust. The sample app builds with `isMinifyEnabled = true`, so `./gradlew :app:assembleRelease` exercises the library through R8 — including its one reflective path, `Enum.name` matched against `enumConstants` — and produces **no `missing_rules.txt`**, which is R8's way of saying nothing needed keeping.
+
+Build-time success only proves it links, though, so there is also an on-device test. `app/src/androidTest/.../R8SurvivalTest.kt` runs against the minified APK and round-trips enum, `Set<Enum>`, `Double`, `ByteArray`, `Set<String>` and `Date` preferences, plus the migration machinery:
+
+```bash
+./gradlew :app:connectedAndroidTest -PminifiedTests
+```
+
+**Manual, and deliberately not in CI** — it needs a connected device. Without `-PminifiedTests` the instrumented tests run against the unminified debug build and prove nothing, so the suite's first test asserts at runtime that its own classes were actually renamed and fails loudly if not.
+
+Last verified on a real device with the sample's classes obfuscated to `NormalPrefs -> wn`, `Theme -> sw`, `Feature -> hh` — while `Theme.DARK` still persisted and reloaded as the string `"DARK"`. That is the property enum preferences depend on.
+
+Two caveats worth stating. Running instrumented tests against a minified app needs harness keep rules of its own (`proguard-rules-instrumentation.pro`, applied only under `-PminifiedTests`) because R8 strips test-only entry points and any helper method the sample itself never calls. None of that is required by consumers, which is exactly why it lives in a separate conditional file rather than in `proguard-rules.pro`. And `gradle.properties` sets `android.r8.strictFullModeForKeepRules=false`; the verification above holds with that setting as configured.

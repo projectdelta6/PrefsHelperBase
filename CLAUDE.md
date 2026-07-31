@@ -27,6 +27,14 @@ LocalDateTime, LocalDate, LocalTime, and Enums.
 ./gradlew :app:koverHtmlReportDebug   # HTML -> app/build/reports/kover/htmlDebug/index.html
 ./gradlew :app:koverVerifyDebug       # fails below the coverage floor (minBound in app/build.gradle.kts)
 
+# R8 verification. The sample's release build is minified on purpose, so this proves the
+# library needs no consumer keep rules (no missing_rules.txt = nothing needed keeping).
+./gradlew :app:assembleRelease
+
+# Behavioural R8 check — MANUAL, needs a connected device, deliberately not in CI.
+# Points instrumented tests at the minified release build instead of debug.
+./gradlew :app:connectedAndroidTest -PminifiedTests
+
 # Generate documentation (Dokka 2.x V2 task; the old `dokkaHtml` V1 task no longer exists)
 ./gradlew :PrefsHelper:dokkaGenerateHtml
 
@@ -78,7 +86,9 @@ Storage conventions still differ by backend, and deliberately so:
 
 This only reproduces when the delegate is used **from a subclass in another module**, which is why `BaseDataStoreHelperTest`'s `TestDataStoreHelper` (in `:app`) declares `delegate`-prefixed properties for both enum delegates. A test that calls `readEnumSetValue` directly will not catch a regression here.
 
-- **Tests are JVM-only (Robolectric), not instrumented**: all three test classes live in `app/src/test` (`BasePrefsHelperTest`, `BaseDataStoreHelperTest`, and `BaseDataStoreHelperInjectionTest`). `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
+- **R8 verification is manual and needs a device**: `app/src/androidTest/R8SurvivalTest.kt` is the only test that can check the README's "no consumer ProGuard rules" claim, since unit tests never run R8 and Robolectric runs unminified code. It only means anything with `-PminifiedTests`, which flips `testBuildType` to the minified release build; its first test asserts at runtime that classes really were renamed so a debug run can't pass vacuously. Harness keeps live in `proguard-rules-instrumentation.pro`, applied **only** under that flag — keep them out of `proguard-rules.pro`, or a plain `assembleRelease` stops being evidence that consumers need no rules.
+
+- **Tests are JVM-only (Robolectric), not instrumented**: all *unit* test classes live in `app/src/test` (`BasePrefsHelperTest`, `BaseDataStoreHelperTest`, and `BaseDataStoreHelperInjectionTest`). `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
 
 ## Project Structure
 

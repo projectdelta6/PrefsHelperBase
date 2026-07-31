@@ -39,6 +39,9 @@ androidx-dataStore = { group = "androidx.datastore", name = "datastore-preferenc
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+# Needed only by the minified instrumented-test APK: AndroidJUnitRunner touches androidx.tracing.Trace
+# at startup, and it is not pulled in transitively here.
+androidx-tracing = { module = "androidx.tracing:tracing", version = "1.2.0" }
 
 android-documentation-plugin = { module = "org.jetbrains.dokka:android-documentation-plugin", version.ref = "dokka" }
 
