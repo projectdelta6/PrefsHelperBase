@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlin.time.Duration.Companion.milliseconds
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -86,6 +87,58 @@ class BaseDataStoreHelperTest {
 		dataStoreHelper.testWriteDouble("double_key", 3.14)
 		val value = dataStoreHelper.testReadDoubleValue("double_key")
 		assertEquals(3.14, value ?: 0.0, 0.01)
+	}
+
+	@Test
+	fun testWriteAndReadDate() = runBlocking {
+		val date = java.util.Date(1_700_000_000_000L)
+		dataStoreHelper.testWriteDate("date_key", date)
+		assertEquals(date, dataStoreHelper.testReadDateValue("date_key"))
+	}
+
+	/**
+	 * Date is stored as epoch millis, so it must survive the epoch itself and pre-epoch (negative)
+	 * values — the case a naive -1L sentinel would corrupt.
+	 */
+	@Test
+	fun testDateBoundaryValues() = runBlocking {
+		val epoch = java.util.Date(0L)
+		dataStoreHelper.testWriteDate("epoch", epoch)
+		assertEquals(epoch, dataStoreHelper.testReadDateValue("epoch"))
+
+		val preEpoch = java.util.Date(-1L)
+		dataStoreHelper.testWriteDate("pre_epoch", preEpoch)
+		assertEquals(preEpoch, dataStoreHelper.testReadDateValue("pre_epoch"))
+	}
+
+	@Test
+	fun testWriteNullDateRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteDate("null_date_key", java.util.Date(1_700_000_000_000L))
+		assertNotNull(dataStoreHelper.testReadDateValue("null_date_key"))
+
+		dataStoreHelper.testWriteDate("null_date_key", null)
+		assertNull(dataStoreHelper.testReadDateValue("null_date_key"))
+	}
+
+	@Test
+	fun testReadDateFlow() = runBlocking {
+		val date = java.util.Date(1_600_000_000_000L)
+		dataStoreHelper.testWriteDate("date_flow_key", date)
+		assertEquals(date, dataStoreHelper.testReadDateFlow("date_flow_key").first())
+	}
+
+	@Test
+	fun testReadDateValueWithDefault() = runBlocking {
+		val fallback = java.util.Date(42L)
+		assertEquals(fallback, dataStoreHelper.testReadDateValueWithDefault("no_such_date", fallback))
+		assertEquals(fallback, dataStoreHelper.testReadDateFlowWithDefault("no_such_date", fallback).first())
+	}
+
+	@Test
+	fun testWriteDateAsync() = runBlocking {
+		val date = java.util.Date(1_500_000_000_000L)
+		dataStoreHelper.testWriteDateAsync("date_async_key", date).join()
+		assertEquals(date, dataStoreHelper.testReadDateValue("date_async_key"))
 	}
 
 	@Test
@@ -839,6 +892,484 @@ class BaseDataStoreHelperTest {
 		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateLocalTime })
 	}
 
+	// region Float
+
+	@Test
+	fun testWriteAndReadFloat() = runBlocking {
+		dataStoreHelper.testWriteFloat("float_key", 3.14f)
+		assertEquals(3.14f, dataStoreHelper.testReadFloatValue("float_key") ?: 0f, 0.0001f)
+	}
+
+	@Test
+	fun testFloatBoundaryValues() = runBlocking {
+		dataStoreHelper.testWriteFloat("max_float", Float.MAX_VALUE)
+		assertEquals(Float.MAX_VALUE, dataStoreHelper.testReadFloatValue("max_float"))
+
+		dataStoreHelper.testWriteFloat("min_float", Float.MIN_VALUE)
+		assertEquals(Float.MIN_VALUE, dataStoreHelper.testReadFloatValue("min_float"))
+
+		dataStoreHelper.testWriteFloat("negative_float", -42.5f)
+		assertEquals(-42.5f, dataStoreHelper.testReadFloatValue("negative_float") ?: 0f, 0.0001f)
+	}
+
+	@Test
+	fun testFloatNaN() = runBlocking {
+		dataStoreHelper.testWriteFloat("nan_float", Float.NaN)
+		val value = dataStoreHelper.testReadFloatValue("nan_float")
+		assertNotNull(value)
+		assertTrue("Value should be NaN", value!!.isNaN())
+	}
+
+	@Test
+	fun testWriteNullFloatRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteFloat("null_float_key", 1.5f)
+		assertNotNull(dataStoreHelper.testReadFloatValue("null_float_key"))
+
+		dataStoreHelper.testWriteFloat("null_float_key", null)
+		assertNull(dataStoreHelper.testReadFloatValue("null_float_key"))
+	}
+
+	@Test
+	fun testReadFloatFlow() = runBlocking {
+		dataStoreHelper.testWriteFloat("float_flow_key", 2.5f)
+		assertEquals(2.5f, dataStoreHelper.testReadFloatFlow("float_flow_key").first() ?: 0f, 0.0001f)
+	}
+
+	@Test
+	fun testReadFloatValueWithDefault() = runBlocking {
+		assertEquals(9.9f, dataStoreHelper.testReadFloatValueWithDefault("no_such_float", 9.9f), 0.0001f)
+		assertEquals(9.9f, dataStoreHelper.testReadFloatFlowWithDefault("no_such_float", 9.9f).first(), 0.0001f)
+	}
+
+	@Test
+	fun testWriteFloatAsync() = runBlocking {
+		dataStoreHelper.testWriteFloatAsync("float_async_key", 7.7f).join()
+		assertEquals(7.7f, dataStoreHelper.testReadFloatValue("float_async_key") ?: 0f, 0.0001f)
+	}
+
+	@Test
+	fun testFloatPrefDelegateRoundTripsValue() = runBlocking {
+		dataStoreHelper.delegateFloat = 1.25f
+		val value = awaitValue(predicate = { it == 1.25f }) { dataStoreHelper.delegateFloat }
+		assertEquals(1.25f, value, 0.0001f)
+	}
+
+	@Test
+	fun testFloatPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(-1f, dataStoreHelper.delegateFloat, 0.0001f)
+	}
+
+	@Test
+	fun testNullableFloatPrefDelegateRemovesKeyOnNull() = runBlocking {
+		dataStoreHelper.delegateNullableFloat = 0.5f
+		assertEquals(0.5f, awaitValue(predicate = { it == 0.5f }) { dataStoreHelper.delegateNullableFloat } ?: 0f, 0.0001f)
+
+		dataStoreHelper.delegateNullableFloat = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableFloat })
+	}
+
+	@Test
+	fun testFloatPrefFlowEmitsDelegateWrites() = runBlocking {
+		dataStoreHelper.delegateFloat = 3.5f
+		awaitValue(predicate = { it == 3.5f }) { dataStoreHelper.delegateFloat }
+		assertEquals(3.5f, dataStoreHelper.delegateFloatFlow.first(), 0.0001f)
+	}
+
+	// endregion
+
+	// region StringSet
+
+	@Test
+	fun testWriteAndReadStringSet() = runBlocking {
+		val values = setOf("alpha", "beta", "gamma")
+		dataStoreHelper.testWriteStringSet("string_set_key", values)
+		assertEquals(values, dataStoreHelper.testReadStringSetValue("string_set_key"))
+	}
+
+	@Test
+	fun testStringSetEmptyRoundTripsAsEmptyNotNull() = runBlocking {
+		dataStoreHelper.testWriteStringSet("empty_set_key", emptySet())
+		val value = dataStoreHelper.testReadStringSetValue("empty_set_key")
+		assertNotNull("Empty set must be stored distinctly from an absent key", value)
+		assertEquals(emptySet<String>(), value)
+		assertNull(dataStoreHelper.testReadStringSetValue("absent_set_key"))
+	}
+
+	@Test
+	fun testStringSetContainingEmptyString() = runBlocking {
+		val values = setOf("", "present")
+		dataStoreHelper.testWriteStringSet("set_with_empty_string", values)
+		assertEquals(values, dataStoreHelper.testReadStringSetValue("set_with_empty_string"))
+	}
+
+	@Test
+	fun testWriteNullStringSetRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteStringSet("null_set_key", setOf("a"))
+		assertNotNull(dataStoreHelper.testReadStringSetValue("null_set_key"))
+
+		dataStoreHelper.testWriteStringSet("null_set_key", null)
+		assertNull(dataStoreHelper.testReadStringSetValue("null_set_key"))
+	}
+
+	@Test
+	fun testReadStringSetFlow() = runBlocking {
+		val values = setOf("one", "two")
+		dataStoreHelper.testWriteStringSet("string_set_flow_key", values)
+		assertEquals(values, dataStoreHelper.testReadStringSetFlow("string_set_flow_key").first())
+	}
+
+	@Test
+	fun testReadStringSetValueWithDefault() = runBlocking {
+		val fallback = setOf("default")
+		assertEquals(fallback, dataStoreHelper.testReadStringSetValueWithDefault("no_such_set", fallback))
+		assertEquals(fallback, dataStoreHelper.testReadStringSetFlowWithDefault("no_such_set", fallback).first())
+	}
+
+	@Test
+	fun testWriteStringSetAsync() = runBlocking {
+		val values = setOf("async_a", "async_b")
+		dataStoreHelper.testWriteStringSetAsync("string_set_async_key", values).join()
+		assertEquals(values, dataStoreHelper.testReadStringSetValue("string_set_async_key"))
+	}
+
+	@Test
+	fun testStringSetPrefDelegateRoundTripsValue() = runBlocking {
+		val values = setOf("x", "y")
+		dataStoreHelper.delegateStringSet = values
+		val value = awaitValue(predicate = { it == values }) { dataStoreHelper.delegateStringSet }
+		assertEquals(values, value)
+	}
+
+	@Test
+	fun testStringSetPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(emptySet<String>(), dataStoreHelper.delegateStringSet)
+	}
+
+	@Test
+	fun testNullableStringSetPrefDelegateRemovesKeyOnNull() = runBlocking {
+		val values = setOf("temp")
+		dataStoreHelper.delegateNullableStringSet = values
+		assertEquals(values, awaitValue(predicate = { it == values }) { dataStoreHelper.delegateNullableStringSet })
+
+		dataStoreHelper.delegateNullableStringSet = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableStringSet })
+	}
+
+	@Test
+	fun testStringSetPrefFlowEmitsDelegateWrites() = runBlocking {
+		val values = setOf("flowed")
+		dataStoreHelper.delegateStringSet = values
+		awaitValue(predicate = { it == values }) { dataStoreHelper.delegateStringSet }
+		assertEquals(values, dataStoreHelper.delegateStringSetFlow.first())
+	}
+
+	// endregion
+
+	// region ByteArray
+
+	@Test
+	fun testWriteAndReadByteArray() = runBlocking {
+		val bytes = byteArrayOf(0, -1, 127, -128)
+		dataStoreHelper.testWriteByteArray("byte_array_key", bytes)
+		assertArrayEquals(bytes, dataStoreHelper.testReadByteArrayValue("byte_array_key"))
+	}
+
+	@Test
+	fun testByteArrayEmptyRoundTrips() = runBlocking {
+		dataStoreHelper.testWriteByteArray("empty_bytes_key", byteArrayOf())
+		assertArrayEquals(byteArrayOf(), dataStoreHelper.testReadByteArrayValue("empty_bytes_key"))
+	}
+
+	@Test
+	fun testWriteNullByteArrayRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteByteArray("null_bytes_key", byteArrayOf(1, 2, 3))
+		assertNotNull(dataStoreHelper.testReadByteArrayValue("null_bytes_key"))
+
+		dataStoreHelper.testWriteByteArray("null_bytes_key", null)
+		assertNull(dataStoreHelper.testReadByteArrayValue("null_bytes_key"))
+	}
+
+	@Test
+	fun testReadByteArrayFlow() = runBlocking {
+		val bytes = byteArrayOf(10, 20, 30)
+		dataStoreHelper.testWriteByteArray("byte_array_flow_key", bytes)
+		assertArrayEquals(bytes, dataStoreHelper.testReadByteArrayFlow("byte_array_flow_key").first())
+	}
+
+	@Test
+	fun testReadByteArrayValueWithDefault() = runBlocking {
+		val fallback = byteArrayOf(9)
+		assertArrayEquals(fallback, dataStoreHelper.testReadByteArrayValueWithDefault("no_such_bytes", fallback))
+		assertArrayEquals(fallback, dataStoreHelper.testReadByteArrayFlowWithDefault("no_such_bytes", fallback).first())
+	}
+
+	@Test
+	fun testWriteByteArrayAsync() = runBlocking {
+		val bytes = byteArrayOf(0, -1, 127, -128)
+		dataStoreHelper.testWriteByteArrayAsync("byte_array_async_key", bytes).join()
+		assertArrayEquals(bytes, dataStoreHelper.testReadByteArrayValue("byte_array_async_key"))
+	}
+
+	@Test
+	fun testByteArrayPrefDelegateRoundTripsValue() = runBlocking {
+		// byteArrayPref is nullable-only (no defaulted overload).
+		val bytes = byteArrayOf(0, -1, 127, -128)
+		dataStoreHelper.delegateByteArray = bytes
+		val value = awaitValue(predicate = { it != null && it.contentEquals(bytes) }) {
+			dataStoreHelper.delegateByteArray
+		}
+		assertArrayEquals(bytes, value)
+	}
+
+	@Test
+	fun testByteArrayPrefDelegateRemovesKeyOnNull() = runBlocking {
+		val bytes = byteArrayOf(1)
+		dataStoreHelper.delegateByteArray = bytes
+		assertNotNull(awaitValue(predicate = { it != null && it.contentEquals(bytes) }) { dataStoreHelper.delegateByteArray })
+
+		dataStoreHelper.delegateByteArray = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateByteArray })
+	}
+
+	@Test
+	fun testByteArrayPrefFlowEmitsDelegateWrites() = runBlocking {
+		val bytes = byteArrayOf(5, 6)
+		dataStoreHelper.delegateByteArray = bytes
+		awaitValue(predicate = { it != null && it.contentEquals(bytes) }) { dataStoreHelper.delegateByteArray }
+		assertArrayEquals(bytes, dataStoreHelper.delegateByteArrayFlow.first())
+	}
+
+	// endregion
+
+	// region Instant
+
+	@Test
+	fun testWriteAndReadInstant() = runBlocking {
+		val instant = java.time.Instant.ofEpochMilli(1_700_000_000_123L)
+		dataStoreHelper.testWriteInstant("instant_key", instant)
+		assertEquals(instant, dataStoreHelper.testReadInstantValue("instant_key"))
+	}
+
+	/**
+	 * Instant is stored as epoch millis, so it must survive the epoch itself and pre-epoch
+	 * (negative millis) values — the case a naive -1L sentinel would corrupt.
+	 */
+	@Test
+	fun testInstantBoundaryValues() = runBlocking {
+		dataStoreHelper.testWriteInstant("epoch", java.time.Instant.EPOCH)
+		assertEquals(java.time.Instant.EPOCH, dataStoreHelper.testReadInstantValue("epoch"))
+
+		val preEpoch = java.time.Instant.ofEpochMilli(-1L)
+		dataStoreHelper.testWriteInstant("pre_epoch", preEpoch)
+		assertEquals(preEpoch, dataStoreHelper.testReadInstantValue("pre_epoch"))
+	}
+
+	@Test
+	fun testInstantMillisecondPrecisionRoundTrip() = runBlocking {
+		// Storage is epoch millis — sub-millisecond nanos are truncated by design.
+		val millisPrecise = java.time.Instant.ofEpochMilli(1_600_000_000_999L)
+		dataStoreHelper.testWriteInstant("ms_precision", millisPrecise)
+		assertEquals(millisPrecise, dataStoreHelper.testReadInstantValue("ms_precision"))
+		assertEquals(1_600_000_000_999L, dataStoreHelper.testReadInstantValue("ms_precision")!!.toEpochMilli())
+	}
+
+	@Test
+	fun testWriteNullInstantRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteInstant("null_instant_key", java.time.Instant.EPOCH)
+		assertNotNull(dataStoreHelper.testReadInstantValue("null_instant_key"))
+
+		dataStoreHelper.testWriteInstant("null_instant_key", null)
+		assertNull(dataStoreHelper.testReadInstantValue("null_instant_key"))
+	}
+
+	@Test
+	fun testReadInstantFlow() = runBlocking {
+		val instant = java.time.Instant.ofEpochMilli(1_500_000_000_000L)
+		dataStoreHelper.testWriteInstant("instant_flow_key", instant)
+		assertEquals(instant, dataStoreHelper.testReadInstantFlow("instant_flow_key").first())
+	}
+
+	@Test
+	fun testReadInstantValueWithDefault() = runBlocking {
+		val fallback = java.time.Instant.ofEpochMilli(42L)
+		assertEquals(fallback, dataStoreHelper.testReadInstantValueWithDefault("no_such_instant", fallback))
+		assertEquals(fallback, dataStoreHelper.testReadInstantFlowWithDefault("no_such_instant", fallback).first())
+	}
+
+	@Test
+	fun testWriteInstantAsync() = runBlocking {
+		val instant = java.time.Instant.ofEpochMilli(1_400_000_000_000L)
+		dataStoreHelper.testWriteInstantAsync("instant_async_key", instant).join()
+		assertEquals(instant, dataStoreHelper.testReadInstantValue("instant_async_key"))
+	}
+
+	@Test
+	fun testInstantPrefDelegateRoundTripsValue() = runBlocking {
+		val instant = java.time.Instant.ofEpochMilli(99L)
+		dataStoreHelper.delegateInstant = instant
+		val value = awaitValue(predicate = { it == instant }) { dataStoreHelper.delegateInstant }
+		assertEquals(instant, value)
+	}
+
+	@Test
+	fun testInstantPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(java.time.Instant.EPOCH, dataStoreHelper.delegateInstant)
+	}
+
+	@Test
+	fun testNullableInstantPrefDelegateRemovesKeyOnNull() = runBlocking {
+		val instant = java.time.Instant.ofEpochMilli(1L)
+		dataStoreHelper.delegateNullableInstant = instant
+		assertEquals(instant, awaitValue(predicate = { it == instant }) { dataStoreHelper.delegateNullableInstant })
+
+		dataStoreHelper.delegateNullableInstant = null
+		assertNull(awaitValue(predicate = { it == null }) { dataStoreHelper.delegateNullableInstant })
+	}
+
+	@Test
+	fun testInstantPrefFlowEmitsDelegateWrites() = runBlocking {
+		val instant = java.time.Instant.ofEpochMilli(123L)
+		dataStoreHelper.delegateInstant = instant
+		awaitValue(predicate = { it == instant }) { dataStoreHelper.delegateInstant }
+		assertEquals(instant, dataStoreHelper.delegateInstantFlow.first())
+	}
+
+	// endregion
+
+	// region EnumSet
+
+	@Test
+	fun testWriteAndReadEnumSet() = runBlocking {
+		val values: Set<Enum<*>> = setOf(TestEnum.VALUE_A, TestEnum.VALUE_C)
+		dataStoreHelper.testWriteEnumSet("enum_set_key", values)
+		assertEquals(
+			setOf(TestEnum.VALUE_A, TestEnum.VALUE_C),
+			dataStoreHelper.testReadEnumSetValue<TestEnum>("enum_set_key"),
+		)
+	}
+
+	@Test
+	fun testEnumSetEmptyRoundTrips() = runBlocking {
+		dataStoreHelper.testWriteEnumSet("empty_enum_set", emptySet())
+		assertEquals(emptySet<TestEnum>(), dataStoreHelper.testReadEnumSetValue<TestEnum>("empty_enum_set"))
+	}
+
+	@Test
+	fun testWriteNullEnumSetRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteEnumSet("null_enum_set", setOf(TestEnum.VALUE_A))
+		assertEquals(setOf(TestEnum.VALUE_A), dataStoreHelper.testReadEnumSetValue<TestEnum>("null_enum_set"))
+
+		dataStoreHelper.testWriteEnumSet("null_enum_set", null)
+		// Key gone → default empty set (readEnumSetValue is non-nullable with default emptySet).
+		assertEquals(emptySet<TestEnum>(), dataStoreHelper.testReadEnumSetValue<TestEnum>("null_enum_set"))
+		// Confirm the underlying string-set key is actually gone, not just filtered.
+		assertNull(dataStoreHelper.testReadStringSetValue("null_enum_set"))
+	}
+
+	/**
+	 * Parity guard against `BasePrefsHelper`: a stored empty set is not the same as an absent key,
+	 * so it must win over a non-empty default. `BasePrefsHelper.getEnumSet` originally got this
+	 * wrong by testing `isEmpty()` instead of key presence.
+	 */
+	@Test
+	fun testEmptyEnumSetBeatsNonEmptyDefault() = runBlocking {
+		val default = setOf(TestEnum.VALUE_A)
+
+		// Absent -> default.
+		assertEquals(default, dataStoreHelper.testReadEnumSetValue("absent_enum_set", default))
+
+		// Stored empty -> empty, not the default.
+		dataStoreHelper.testWriteEnumSet("stored_empty_enum_set", emptySet())
+		assertEquals(
+			emptySet<TestEnum>(),
+			dataStoreHelper.testReadEnumSetValue("stored_empty_enum_set", default),
+		)
+	}
+
+	@Test
+	fun testReadEnumSetFlow() = runBlocking {
+		dataStoreHelper.testWriteEnumSet("enum_set_flow_key", setOf(TestEnum.VALUE_B))
+		assertEquals(
+			setOf(TestEnum.VALUE_B),
+			dataStoreHelper.testReadEnumSetFlow<TestEnum>("enum_set_flow_key").first(),
+		)
+	}
+
+	@Test
+	fun testReadEnumSetValueWithDefault() = runBlocking {
+		val fallback = setOf(TestEnum.VALUE_A)
+		assertEquals(fallback, dataStoreHelper.testReadEnumSetValue("no_such_enum_set", fallback))
+		assertEquals(fallback, dataStoreHelper.testReadEnumSetFlow("no_such_enum_set", fallback).first())
+	}
+
+	@Test
+	fun testWriteEnumSetAsync() = runBlocking {
+		dataStoreHelper.testWriteEnumSetAsync("enum_set_async_key", setOf(TestEnum.VALUE_C)).join()
+		assertEquals(
+			setOf(TestEnum.VALUE_C),
+			dataStoreHelper.testReadEnumSetValue<TestEnum>("enum_set_async_key"),
+		)
+	}
+
+	/**
+	 * Stored enum-set names that no longer match a constant must be dropped silently — removing an
+	 * enum constant from the app must not throw when reading previously stored preference data.
+	 */
+	@Test
+	fun testEnumSetDropsUnknownNames() = runBlocking {
+		// Write a raw string set on the same key so we can inject a name that is not a TestEnum constant.
+		dataStoreHelper.testWriteStringSet(
+			"enum_set_unknown_names",
+			setOf(TestEnum.VALUE_A.name, "BOGUS_REMOVED_CONSTANT", TestEnum.VALUE_B.name),
+		)
+		assertEquals(
+			setOf(TestEnum.VALUE_A, TestEnum.VALUE_B),
+			dataStoreHelper.testReadEnumSetValue<TestEnum>("enum_set_unknown_names"),
+		)
+		assertEquals(
+			setOf(TestEnum.VALUE_A, TestEnum.VALUE_B),
+			dataStoreHelper.testReadEnumSetFlow<TestEnum>("enum_set_unknown_names").first(),
+		)
+	}
+
+	/**
+	 * Exercises [enumSetPref] through a property delegate on the [TestDataStoreHelper] subclass.
+	 *
+	 * Why this exists: an `inline fun <reified T>` that returns an anonymous object calling
+	 * `protected` members of [BaseDataStoreHelper] throws [IllegalAccessError] at runtime when the
+	 * anonymous class is emitted inside a subclass in another module (losing JVM-level protected
+	 * access). [enumSetPref] is implemented as a thin inline wrapper over a non-inline
+	 * `@PublishedApi internal enumSetPrefInternal` specifically to avoid that. Calling only
+	 * [readEnumSetValue] would not catch a regression that re-inlines the anonymous object into the
+	 * subclass — this test must go through the delegate property.
+	 */
+	@Test
+	fun testEnumSetPrefDelegateRoundTripsValue() = runBlocking {
+		val values = setOf(TestEnum.VALUE_A, TestEnum.VALUE_C)
+		dataStoreHelper.delegateEnumSet = values
+		val value = awaitValue(predicate = { it == values }) { dataStoreHelper.delegateEnumSet }
+		assertEquals(values, value)
+	}
+
+	@Test
+	fun testEnumSetPrefDelegateReturnsDefaultWhenAbsent() = runBlocking {
+		dataStoreHelper.testClearPrefs()
+		assertEquals(emptySet<TestEnum>(), dataStoreHelper.delegateEnumSet)
+	}
+
+	@Test
+	fun testEnumSetPrefFlowEmitsDelegateWrites() = runBlocking {
+		val values = setOf(TestEnum.VALUE_B)
+		dataStoreHelper.delegateEnumSet = values
+		awaitValue(predicate = { it == values }) { dataStoreHelper.delegateEnumSet }
+		assertEquals(values, dataStoreHelper.delegateEnumSetFlow.first())
+	}
+
+	// endregion
+
 	enum class TestEnum {
 		VALUE_A, VALUE_B, VALUE_C
 	}
@@ -905,6 +1436,13 @@ class BaseDataStoreHelperTest {
 		fun testReadDoubleFlowWithDefault(key: String, default: Double) = readDouble(key, default)
 		fun testWriteDoubleAsync(key: String, value: Double?) = writeDoubleAsync(key, value)
 
+		suspend fun testWriteDate(key: String, value: java.util.Date?) = writeDate(key, value)
+		fun testReadDateValue(key: String) = readDateValue(key)
+		fun testReadDateValueWithDefault(key: String, default: java.util.Date) = readDateValue(key, default)
+		fun testReadDateFlow(key: String) = readDate(key)
+		fun testReadDateFlowWithDefault(key: String, default: java.util.Date) = readDate(key, default)
+		fun testWriteDateAsync(key: String, value: java.util.Date?) = writeDateAsync(key, value)
+
 		suspend fun testWriteBoolean(key: String, value: Boolean?) = writeBoolean(key, value)
 		fun testReadBooleanValue(key: String) = readBooleanValue(key)
 		fun testReadBooleanValueWithDefault(key: String, default: Boolean) = readBooleanValue(key, default)
@@ -935,6 +1473,50 @@ class BaseDataStoreHelperTest {
 		fun testReadLocalTimeFlow(key: String) = readLocalTime(key)
 		fun testReadLocalTimeFlowWithDefault(key: String, default: java.time.LocalTime) = readLocalTime(key, default)
 		fun testWriteLocalTimeAsync(key: String, value: java.time.LocalTime?) = writeLocalTimeAsync(key, value)
+
+		// Float methods
+		suspend fun testWriteFloat(key: String, value: Float?) = writeFloat(key, value)
+		fun testReadFloatValue(key: String) = readFloatValue(key)
+		fun testReadFloatValueWithDefault(key: String, default: Float) = readFloatValue(key, default)
+		fun testReadFloatFlow(key: String) = readFloat(key)
+		fun testReadFloatFlowWithDefault(key: String, default: Float) = readFloat(key, default)
+		fun testWriteFloatAsync(key: String, value: Float?) = writeFloatAsync(key, value)
+
+		// StringSet methods
+		suspend fun testWriteStringSet(key: String, value: Set<String>?) = writeStringSet(key, value)
+		fun testReadStringSetValue(key: String) = readStringSetValue(key)
+		fun testReadStringSetValueWithDefault(key: String, default: Set<String>) = readStringSetValue(key, default)
+		fun testReadStringSetFlow(key: String) = readStringSet(key)
+		fun testReadStringSetFlowWithDefault(key: String, default: Set<String>) = readStringSet(key, default)
+		fun testWriteStringSetAsync(key: String, value: Set<String>?) = writeStringSetAsync(key, value)
+
+		// ByteArray methods
+		suspend fun testWriteByteArray(key: String, value: ByteArray?) = writeByteArray(key, value)
+		fun testReadByteArrayValue(key: String) = readByteArrayValue(key)
+		fun testReadByteArrayValueWithDefault(key: String, default: ByteArray) = readByteArrayValue(key, default)
+		fun testReadByteArrayFlow(key: String) = readByteArray(key)
+		fun testReadByteArrayFlowWithDefault(key: String, default: ByteArray) = readByteArray(key, default)
+		fun testWriteByteArrayAsync(key: String, value: ByteArray?) = writeByteArrayAsync(key, value)
+
+		// Instant methods
+		suspend fun testWriteInstant(key: String, value: java.time.Instant?) = writeInstant(key, value)
+		fun testReadInstantValue(key: String) = readInstantValue(key)
+		fun testReadInstantValueWithDefault(key: String, default: java.time.Instant) = readInstantValue(key, default)
+		fun testReadInstantFlow(key: String) = readInstant(key)
+		fun testReadInstantFlowWithDefault(key: String, default: java.time.Instant) = readInstant(key, default)
+		fun testWriteInstantAsync(key: String, value: java.time.Instant?) = writeInstantAsync(key, value)
+
+		// EnumSet methods
+		suspend fun testWriteEnumSet(key: String, value: Set<Enum<*>>?) = writeEnumSet(key, value)
+		fun testWriteEnumSetAsync(key: String, value: Set<Enum<*>>?) = writeEnumSetAsync(key, value)
+		inline fun <reified T : Enum<*>> testReadEnumSetValue(
+			key: String,
+			default: Set<T> = emptySet(),
+		) = readEnumSetValue(key, default)
+		inline fun <reified T : Enum<*>> testReadEnumSetFlow(
+			key: String,
+			default: Set<T> = emptySet(),
+		) = readEnumSet(key, default)
 
 		// Enum property-based access - Uses actual BaseDataStoreHelper enum methods
 		// This pattern matches NormalDataStore and actually tests the base class methods!
@@ -982,6 +1564,26 @@ class BaseDataStoreHelperTest {
 		var delegateLocalDate by localDatePref(KEY_DELEGATE_LD)
 		var delegateLocalTime by localTimePref(KEY_DELEGATE_LT)
 
+		var delegateFloat by floatPref(KEY_DELEGATE_FLOAT, defaultValue = -1f)
+		var delegateNullableFloat by floatPref(KEY_DELEGATE_NULLABLE_FLOAT)
+		val delegateFloatFlow = floatPrefFlow(KEY_DELEGATE_FLOAT, defaultValue = -1f)
+
+		var delegateStringSet by stringSetPref(KEY_DELEGATE_STRING_SET, defaultValue = emptySet())
+		var delegateNullableStringSet by stringSetPref(KEY_DELEGATE_NULLABLE_STRING_SET)
+		val delegateStringSetFlow = stringSetPrefFlow(KEY_DELEGATE_STRING_SET, defaultValue = emptySet())
+
+		// byteArrayPref is nullable-only (no defaulted overload).
+		var delegateByteArray by byteArrayPref(KEY_DELEGATE_BYTE_ARRAY)
+		val delegateByteArrayFlow = byteArrayPrefFlow(KEY_DELEGATE_BYTE_ARRAY)
+
+		var delegateInstant by instantPref(KEY_DELEGATE_INSTANT, defaultValue = java.time.Instant.EPOCH)
+		var delegateNullableInstant by instantPref(KEY_DELEGATE_NULLABLE_INSTANT)
+		val delegateInstantFlow = instantPrefFlow(KEY_DELEGATE_INSTANT, defaultValue = java.time.Instant.EPOCH)
+
+		// Critical IllegalAccessError regression surface — see testEnumSetPrefDelegateRoundTripsValue.
+		var delegateEnumSet by enumSetPref(KEY_DELEGATE_ENUM_SET, defaultValue = emptySet<TestEnum>())
+		val delegateEnumSetFlow = enumSetPrefFlow(KEY_DELEGATE_ENUM_SET, defaultValue = emptySet<TestEnum>())
+
 		companion object {
 			private const val KEY_TEST_ENUM = "test_enum_key"
 			private const val KEY_DELEGATE_INT = "delegate_int_key"
@@ -999,6 +1601,14 @@ class BaseDataStoreHelperTest {
 			private const val KEY_DELEGATE_LDT = "delegate_ldt_key"
 			private const val KEY_DELEGATE_LD = "delegate_ld_key"
 			private const val KEY_DELEGATE_LT = "delegate_lt_key"
+			private const val KEY_DELEGATE_FLOAT = "delegate_float_key"
+			private const val KEY_DELEGATE_NULLABLE_FLOAT = "delegate_nullable_float_key"
+			private const val KEY_DELEGATE_STRING_SET = "delegate_string_set_key"
+			private const val KEY_DELEGATE_NULLABLE_STRING_SET = "delegate_nullable_string_set_key"
+			private const val KEY_DELEGATE_BYTE_ARRAY = "delegate_byte_array_key"
+			private const val KEY_DELEGATE_INSTANT = "delegate_instant_key"
+			private const val KEY_DELEGATE_NULLABLE_INSTANT = "delegate_nullable_instant_key"
+			private const val KEY_DELEGATE_ENUM_SET = "delegate_enum_set_key"
 		}
 
 		suspend fun testClearPrefs() = clearPrefs()

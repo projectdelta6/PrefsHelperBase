@@ -17,12 +17,18 @@ import com.duck.app.data.prefs.PrefsHelper
 import com.duck.app.ui.theme.PrefsHelperTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.inject
 
 class MainActivity : ComponentActivity() {
+	// Injected rather than constructed. Besides being the idiomatic wiring, this keeps the
+	// Activity out of the helpers entirely — they hold the Application context — and guarantees
+	// the single NormalDataStore instance survives configuration changes, which is what the old
+	// getInstance() singleton was really there to do.
+	private val prefsHelper: PrefsHelper by inject()
+
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		enableEdgeToEdge()
-		val prefsHelper = PrefsHelper(this)
 		prefsHelper.exampleNormalValue = "Hello"
 		prefsHelper.exampleDeviceValue = "World"
 		setContent {

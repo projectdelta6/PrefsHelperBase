@@ -88,6 +88,167 @@ class BasePrefsHelperTest {
 	}
 
 	@Test
+	fun testSetDouble() {
+		prefsHelper.setDouble("key", 3.14)
+		// SharedPreferences has no double primitive — stored as raw IEEE-754 bits in a Long.
+		verify(mockEditor).putLong("key", 3.14.toRawBits())
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testGetDouble() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("key", 0L)).thenReturn(3.14.toRawBits())
+		assertEquals(3.14, prefsHelper.getDouble("key"), 0.0)
+	}
+
+	@Test
+	fun testGetDoubleReturnsDefaultWhenKeyAbsent() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(false)
+		assertEquals(2.5, prefsHelper.getDouble("key", 2.5), 0.0)
+	}
+
+	/**
+	 * The raw-bits encoding must round-trip every double exactly, including the values a
+	 * lossy Float-based encoding would mangle. Mirrors the Double coverage
+	 * `BaseDataStoreHelperTest` has, so both helpers are held to the same standard.
+	 */
+	@Test
+	fun testDoubleBitEncodingRoundTripsExactly() {
+		val values = listOf(
+			0.0,
+			-0.0,
+			3.14159265358979,
+			Double.MAX_VALUE,
+			Double.MIN_VALUE,
+			Double.POSITIVE_INFINITY,
+			Double.NEGATIVE_INFINITY,
+		)
+		for (value in values) {
+			assertEquals(value, Double.fromBits(value.toRawBits()), 0.0)
+		}
+		assertTrue(Double.fromBits(Double.NaN.toRawBits()).isNaN())
+	}
+
+	@Test
+	fun testSetFloat() {
+		prefsHelper.setFloat("key", 1.5f)
+		verify(mockEditor).putFloat("key", 1.5f)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testGetFloat() {
+		`when`(mockSharedPreferences.getFloat("key", 0f)).thenReturn(2.5f)
+		assertEquals(2.5f, prefsHelper.getFloat("key"), 0f)
+	}
+
+	@Test
+	fun testSetStringSet() {
+		prefsHelper.setStringSet("key", setOf("a", "b"))
+		verify(mockEditor).putStringSet("key", linkedSetOf("a", "b"))
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testGetStringSet() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(linkedSetOf("a", "b"))
+		assertEquals(setOf("a", "b"), prefsHelper.getStringSet("key"))
+	}
+
+	@Test
+	fun testGetStringSetReturnsDefaultWhenAbsent() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(null)
+		assertEquals(setOf("fallback"), prefsHelper.getStringSet("key", setOf("fallback")))
+	}
+
+	/**
+	 * [android.content.SharedPreferences.getStringSet] documents its result as one callers must not
+	 * modify, with undefined behaviour if they do. The helper hands back a copy so callers can't
+	 * fall into that; mutating what we return must not touch what the platform gave us.
+	 */
+	@Test
+	fun testGetStringSetReturnsDefensiveCopy() {
+		val backing = linkedSetOf("a", "b")
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(backing)
+
+		val returned = prefsHelper.getStringSet("key") as MutableSet<String>
+		returned.add("c")
+
+		assertEquals(setOf("a", "b"), backing)
+	}
+
+	/**
+	 * Counterpart to the read side: the platform keeps a reference to the set it is handed, so the
+	 * helper must store a copy rather than the caller's instance.
+	 */
+	@Test
+	fun testSetStringSetStoresDefensiveCopy() {
+		val caller = mutableSetOf("a")
+		prefsHelper.setStringSet("key", caller)
+		caller.add("mutated-after-write")
+
+		verify(mockEditor).putStringSet("key", linkedSetOf("a"))
+	}
+
+	@Test
+	fun testSetInstant() {
+		prefsHelper.setInstant("key", java.time.Instant.ofEpochMilli(1_700_000_000_000L))
+		verify(mockEditor).putLong("key", 1_700_000_000_000L)
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testSetInstantNullRemovesKey() {
+		prefsHelper.setInstant("key", null)
+		verify(mockEditor).remove("key")
+	}
+
+	@Test
+	fun testGetInstant() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("key", 0L)).thenReturn(1_700_000_000_000L)
+		assertEquals(java.time.Instant.ofEpochMilli(1_700_000_000_000L), prefsHelper.getInstant("key"))
+	}
+
+	@Test
+	fun testGetInstantReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(false)
+		assertNull(prefsHelper.getInstant("key"))
+	}
+
+	@Test
+	fun testSetEnumSet() {
+		prefsHelper.setEnumSet("key", setOf(TestEnum.VALUE_A, TestEnum.VALUE_B))
+		verify(mockEditor).putStringSet("key", linkedSetOf("VALUE_A", "VALUE_B"))
+	}
+
+	@Test
+	fun testGetEnumSet() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(linkedSetOf("VALUE_A", "VALUE_C"))
+		assertEquals(setOf(TestEnum.VALUE_A, TestEnum.VALUE_C), prefsHelper.getEnumSet<TestEnum>("key"))
+	}
+
+	/**
+	 * Removing an enum constant must not break reads of data stored before the removal — unknown
+	 * names are dropped rather than throwing.
+	 */
+	@Test
+	fun testGetEnumSetDropsUnknownNames() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
+		`when`(mockSharedPreferences.getStringSet("key", null))
+			.thenReturn(linkedSetOf("VALUE_A", "REMOVED_IN_A_LATER_VERSION"))
+		assertEquals(setOf(TestEnum.VALUE_A), prefsHelper.getEnumSet<TestEnum>("key"))
+	}
+
+	@Test
+	fun testGetEnumSetReturnsDefaultWhenAbsent() {
+		`when`(mockSharedPreferences.getStringSet("key", null)).thenReturn(null)
+		assertEquals(setOf(TestEnum.VALUE_B), prefsHelper.getEnumSet("key", setOf(TestEnum.VALUE_B)))
+	}
+
+	@Test
 	fun testGetBoolean() {
 		`when`(mockSharedPreferences.getBoolean("key", false)).thenReturn(true)
 		assertTrue(prefsHelper.getBoolean("key", false))
@@ -138,13 +299,14 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullDate() {
 		prefsHelper.setDate("date_key", null)
-		verify(mockEditor).putLong("date_key", -1L)
+		verify(mockEditor).remove("date_key")
 		verify(mockEditor).apply()
 	}
 
 	@Test
 	fun testGetDate() {
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(1234567890000L)
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_key", 0L)).thenReturn(1234567890000L)
 		val date = prefsHelper.getDate("date_key")
 		assertNotNull(date)
 		assertEquals(1234567890000L, date?.time)
@@ -152,7 +314,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetDateReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(false)
 		assertNull(prefsHelper.getDate("date_key"))
 	}
 
@@ -167,7 +329,7 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullLocalDateTime() {
 		prefsHelper.setLocalDateTime("datetime_key", null)
-		verify(mockEditor).putLong("datetime_key", -1L)
+		verify(mockEditor).remove("datetime_key")
 		verify(mockEditor).apply()
 	}
 
@@ -175,7 +337,8 @@ class BasePrefsHelperTest {
 	fun testGetLocalDateTime() {
 		val dateTime = LocalDateTime.of(2023, 11, 25, 10, 30, 45)
 		val epochSecond = dateTime.toEpochSecond(ZoneOffset.UTC)
-		`when`(mockSharedPreferences.getLong("datetime_key", -1L)).thenReturn(epochSecond)
+		`when`(mockSharedPreferences.contains("datetime_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("datetime_key", 0L)).thenReturn(epochSecond)
 		val result = prefsHelper.getLocalDateTime("datetime_key")
 		assertNotNull(result)
 		assertEquals(dateTime, result)
@@ -183,7 +346,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetLocalDateTimeReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("datetime_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("datetime_key")).thenReturn(false)
 		assertNull(prefsHelper.getLocalDateTime("datetime_key"))
 	}
 
@@ -198,14 +361,15 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullLocalDate() {
 		prefsHelper.setLocalDate("date_key", null)
-		verify(mockEditor).putLong("date_key", -1L)
+		verify(mockEditor).remove("date_key")
 		verify(mockEditor).apply()
 	}
 
 	@Test
 	fun testGetLocalDate() {
 		val date = LocalDate.of(2023, 11, 25)
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(date.toEpochDay())
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_key", 0L)).thenReturn(date.toEpochDay())
 		val result = prefsHelper.getLocalDate("date_key")
 		assertNotNull(result)
 		assertEquals(date, result)
@@ -213,8 +377,19 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetLocalDateReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(false)
 		assertNull(prefsHelper.getLocalDate("date_key"))
+	}
+
+	/**
+	 * Epoch day -1 is 1969-12-31, which the pre-2.0 sentinel made unstorable. It is an ordinary
+	 * value now, so it must NOT be mistaken for "not set".
+	 */
+	@Test
+	fun testGetLocalDateReadsEpochDayMinusOneAsARealDate() {
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_key", 0L)).thenReturn(-1L)
+		assertEquals(LocalDate.of(1969, 12, 31), prefsHelper.getLocalDate("date_key"))
 	}
 
 	@Test
@@ -228,14 +403,15 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullLocalTime() {
 		prefsHelper.setLocalTime("time_key", null)
-		verify(mockEditor).putLong("time_key", -1L)
+		verify(mockEditor).remove("time_key")
 		verify(mockEditor).apply()
 	}
 
 	@Test
 	fun testGetLocalTime() {
 		val time = LocalTime.of(14, 30, 45)
-		`when`(mockSharedPreferences.getLong("time_key", -1L)).thenReturn(time.toSecondOfDay().toLong())
+		`when`(mockSharedPreferences.contains("time_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("time_key", 0L)).thenReturn(time.toSecondOfDay().toLong())
 		val result = prefsHelper.getLocalTime("time_key")
 		assertNotNull(result)
 		assertEquals(time, result)
@@ -243,7 +419,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetLocalTimeReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("time_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("time_key")).thenReturn(false)
 		assertNull(prefsHelper.getLocalTime("time_key"))
 	}
 
@@ -256,8 +432,10 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testSetNullEnum() {
+		// 2.0: removes the key rather than writing "", so null means the same thing here as on
+		// BaseDataStoreHelper and contains(key) agrees between the two.
 		prefsHelper.setEnum("enum_key", null)
-		verify(mockEditor).putString("enum_key", "")
+		verify(mockEditor).remove("enum_key")
 		verify(mockEditor).apply()
 	}
 
@@ -460,6 +638,140 @@ class BasePrefsHelperTest {
 		verify(mockEditor).apply()
 	}
 
+	// Double delegate
+	@Test
+	fun testDoublePrefDelegateGet() {
+		`when`(mockSharedPreferences.contains("double_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("double_key", 0L)).thenReturn(9.75.toRawBits())
+		assertEquals(9.75, prefsHelper.doubleValue, 0.0)
+	}
+
+	@Test
+	fun testDoublePrefDelegateFallsBackToDefault() {
+		`when`(mockSharedPreferences.contains("double_key")).thenReturn(false)
+		assertEquals(1.5, prefsHelper.doubleValue, 0.0)
+	}
+
+	@Test
+	fun testDoublePrefDelegateSet() {
+		prefsHelper.doubleValue = 2.25
+		verify(mockEditor).putLong("double_key", 2.25.toRawBits())
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testNullableDoublePrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_double_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableDouble)
+	}
+
+	@Test
+	fun testNullableDoublePrefReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.contains("nullable_double_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("nullable_double_key", 0L)).thenReturn((-0.5).toRawBits())
+		assertEquals(-0.5, prefsHelper.nullableDouble!!, 0.0)
+	}
+
+	@Test
+	fun testNullableDoublePrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableDouble = null
+		verify(mockEditor).remove("nullable_double_key")
+		verify(mockEditor).apply()
+	}
+
+	// Float delegate
+	@Test
+	fun testFloatPrefDelegateGet() {
+		`when`(mockSharedPreferences.getFloat("float_key", 0.25f)).thenReturn(7.5f)
+		assertEquals(7.5f, prefsHelper.floatValue, 0f)
+	}
+
+	@Test
+	fun testFloatPrefDelegateSet() {
+		prefsHelper.floatValue = 3.5f
+		verify(mockEditor).putFloat("float_key", 3.5f)
+	}
+
+	@Test
+	fun testNullableFloatPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_float_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableFloat)
+	}
+
+	@Test
+	fun testNullableFloatPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableFloat = null
+		verify(mockEditor).remove("nullable_float_key")
+	}
+
+	// String set delegate
+	@Test
+	fun testStringSetPrefDelegateGet() {
+		`when`(mockSharedPreferences.getStringSet("string_set_key", null)).thenReturn(linkedSetOf("x", "y"))
+		assertEquals(setOf("x", "y"), prefsHelper.stringSetValue)
+	}
+
+	@Test
+	fun testStringSetPrefDelegateFallsBackToDefault() {
+		`when`(mockSharedPreferences.getStringSet("string_set_key", null)).thenReturn(null)
+		assertEquals(setOf("default"), prefsHelper.stringSetValue)
+	}
+
+	@Test
+	fun testStringSetPrefDelegateSet() {
+		prefsHelper.stringSetValue = setOf("p", "q")
+		verify(mockEditor).putStringSet("string_set_key", linkedSetOf("p", "q"))
+	}
+
+	@Test
+	fun testNullableStringSetPrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_string_set_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableStringSet)
+	}
+
+	@Test
+	fun testNullableStringSetPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableStringSet = null
+		verify(mockEditor).remove("nullable_string_set_key")
+	}
+
+	// Instant delegate
+	@Test
+	fun testInstantPrefDelegateGet() {
+		`when`(mockSharedPreferences.contains("instant_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("instant_key", 0L)).thenReturn(1_234_567L)
+		assertEquals(java.time.Instant.ofEpochMilli(1_234_567L), prefsHelper.instantValue)
+	}
+
+	@Test
+	fun testInstantPrefDelegateSet() {
+		prefsHelper.instantValue = java.time.Instant.ofEpochMilli(99L)
+		verify(mockEditor).putLong("instant_key", 99L)
+	}
+
+	// Enum set delegate
+	@Test
+	fun testEnumSetPrefDelegateGet() {
+		`when`(mockSharedPreferences.contains("enum_set_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getStringSet("enum_set_key", null))
+			.thenReturn(linkedSetOf("VALUE_B", "VALUE_C"))
+		assertEquals(setOf(TestEnum.VALUE_B, TestEnum.VALUE_C), prefsHelper.enumSetValue)
+	}
+
+	@Test
+	fun testEnumSetPrefDelegateSet() {
+		prefsHelper.enumSetValue = setOf(TestEnum.VALUE_A)
+		verify(mockEditor).putStringSet("enum_set_key", linkedSetOf("VALUE_A"))
+	}
+
+	// ByteArray delegate (encoding itself is covered against a real SharedPreferences in
+	// BasePrefsHelperRealPrefsTest — android.util.Base64 is not available to these plain-JVM mocks)
+	@Test
+	fun testByteArrayPrefRemovesKeyOnNullAssignment() {
+		prefsHelper.byteArrayValue = null
+		verify(mockEditor).remove("byte_array_key")
+	}
+
 	// Boolean delegate
 	@Test
 	fun testBooleanPrefDelegateGet() {
@@ -497,7 +809,8 @@ class BasePrefsHelperTest {
 	// Date delegate
 	@Test
 	fun testDatePrefDelegateGet() {
-		`when`(mockSharedPreferences.getLong("date_delegate_key", -1L)).thenReturn(1234567890000L)
+		`when`(mockSharedPreferences.contains("date_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_delegate_key", 0L)).thenReturn(1234567890000L)
 		assertEquals(Date(1234567890000L), prefsHelper.dateValue)
 	}
 
@@ -510,7 +823,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testDatePrefDelegateReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("date_delegate_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("date_delegate_key")).thenReturn(false)
 		assertNull(prefsHelper.dateValue)
 	}
 
@@ -518,7 +831,8 @@ class BasePrefsHelperTest {
 	@Test
 	fun testLocalDateTimePrefDelegateGet() {
 		val dateTime = LocalDateTime.of(2023, 11, 25, 10, 30, 45)
-		`when`(mockSharedPreferences.getLong("ldt_delegate_key", -1L))
+		`when`(mockSharedPreferences.contains("ldt_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("ldt_delegate_key", 0L))
 			.thenReturn(dateTime.toEpochSecond(ZoneOffset.UTC))
 		assertEquals(dateTime, prefsHelper.localDateTimeValue)
 	}
@@ -535,7 +849,8 @@ class BasePrefsHelperTest {
 	@Test
 	fun testLocalDatePrefDelegateGet() {
 		val date = LocalDate.of(2023, 11, 25)
-		`when`(mockSharedPreferences.getLong("ld_delegate_key", -1L)).thenReturn(date.toEpochDay())
+		`when`(mockSharedPreferences.contains("ld_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("ld_delegate_key", 0L)).thenReturn(date.toEpochDay())
 		assertEquals(date, prefsHelper.localDateValue)
 	}
 
@@ -551,7 +866,8 @@ class BasePrefsHelperTest {
 	@Test
 	fun testLocalTimePrefDelegateGet() {
 		val time = LocalTime.of(14, 30, 45)
-		`when`(mockSharedPreferences.getLong("lt_delegate_key", -1L)).thenReturn(time.toSecondOfDay().toLong())
+		`when`(mockSharedPreferences.contains("lt_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("lt_delegate_key", 0L)).thenReturn(time.toSecondOfDay().toLong())
 		assertEquals(time, prefsHelper.localTimeValue)
 	}
 
@@ -585,7 +901,7 @@ class BasePrefsHelperTest {
 	@Test
 	fun testNullableEnumPrefDelegateSetNull() {
 		prefsHelper.nullableEnumValue = null
-		verify(mockEditor).putString("nullable_enum_key", "")
+		verify(mockEditor).remove("nullable_enum_key")
 		verify(mockEditor).apply()
 	}
 
@@ -603,6 +919,15 @@ class BasePrefsHelperTest {
 		var maybeInt by intPref("maybe_int")
 		var longValue by longPref("long_key", defaultValue = 5L)
 		var nullableLong by longPref("nullable_long_key")
+		var doubleValue by doublePref("double_key", defaultValue = 1.5)
+		var nullableDouble by doublePref("nullable_double_key")
+		var floatValue by floatPref("float_key", defaultValue = 0.25f)
+		var nullableFloat by floatPref("nullable_float_key")
+		var stringSetValue by stringSetPref("string_set_key", defaultValue = setOf("default"))
+		var nullableStringSet by stringSetPref("nullable_string_set_key")
+		var byteArrayValue by byteArrayPref("byte_array_key")
+		var instantValue by instantPref("instant_key")
+		var enumSetValue by enumSetPref<TestEnum>("enum_set_key")
 		var boolValue by booleanPref("bool_key", defaultValue = true)
 		var nullableBool by booleanPref("nullable_bool_key")
 		var dateValue by datePref("date_delegate_key")

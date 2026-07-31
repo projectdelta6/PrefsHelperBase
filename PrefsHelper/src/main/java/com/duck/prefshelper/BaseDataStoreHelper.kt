@@ -4,16 +4,21 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.byteArrayPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import com.duck.prefshelper.BaseDataStoreHelper.Companion.supervisorJob
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.preferencesDataStoreFile
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,10 +31,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import kotlin.coroutines.CoroutineContext
+import java.util.Date
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -40,72 +46,89 @@ import kotlin.reflect.KProperty
  * Provides generic methods to read and write various data types.
  * Includes methods for blocking reads with timeouts.
  *
- * BaseDataStoreHelper uses a coroutine context for background operations.
- * By default, it uses [Dispatchers.IO] + [supervisorJob]. If you need custom job management,
- * pass a context with your own Job or SupervisorJob. Avoid passing a new Job per instance
- * unless you manage its lifecycle explicitly.
+ * Coroutine usage is split across two independent parameters:
  *
- * @param context Application context
- * @param preferenceName Name of the preferences data store
- * @param coroutineContext Coroutine context for async operations
+ * - [dispatcher] decides where `suspend` functions do their work ([withContext]). It carries no
+ *   [Job], so cancelling the caller correctly cancels the work.
+ * - [scope] owns the fire-and-forget `*Async` writes. Inject an application-lifetime scope — for
+ *   example one provided by your DI container with a `CoroutineExceptionHandler` attached — if you
+ *   want async write failures reported rather than thrown into a bare [SupervisorJob].
+ *
+ * The default [scope] is created per instance, so cancelling one helper's scope never affects
+ * another's.
+ *
+ * Each instance owns exactly one [DataStore]. As with the DataStore library itself, there must
+ * only ever be a single active [DataStore] per file in a process — keep subclasses singletons.
+ *
+ * @param dataStore The [DataStore] backing this helper
+ * @param dispatcher The [CoroutineDispatcher] `suspend` functions run on, defaults to [Dispatchers.IO]
+ * @param scope The [CoroutineScope] the `*Async` writes are launched in, defaults to a per-instance
+ * scope of [dispatcher] + [SupervisorJob]
  */
 abstract class BaseDataStoreHelper(
-	context: Context,
-	preferenceName: String,
-	@PublishedApi internal val coroutineContext: CoroutineContext = Dispatchers.IO + supervisorJob
+	@PublishedApi internal val dataStore: DataStore<Preferences>,
+	@PublishedApi internal val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+	protected val scope: CoroutineScope = CoroutineScope(dispatcher + SupervisorJob()),
 ) {
 	/**
-	 * DataStore instance
-	 */
-	private val Context.dataStoreInstance: DataStore<Preferences> by preferencesDataStore(name = preferenceName)
-
-	/**
-	 * DataStore reference
+	 * Creates a helper backed by a Preferences DataStore file named [preferenceName].
 	 *
-	 * Internal visibility allows testing while keeping it hidden from library consumers.
-	 * This is accessed by inline functions which require it to be internal or public.
+	 * This is the convenience path for production code. To supply your own [DataStore] — for
+	 * deterministic unit tests, or to configure migrations or a corruption handler — use the
+	 * primary constructor instead.
+	 *
+	 * The store this creates always runs its own internal actor on [Dispatchers.IO], regardless of
+	 * [dispatcher] — matching what the `preferencesDataStore` delegate did before 2.0. Binding it to
+	 * a caller-supplied [dispatcher] instead would be a silent behaviour change, and a confined
+	 * dispatcher (`Main`, single-threaded, a paused test dispatcher) would then deadlock
+	 * [readValueBlocking] against its own store. Use the primary constructor if you genuinely want
+	 * to control where the store schedules its work.
+	 *
+	 * One-off data migrations go through [migrations], DataStore's own mechanism. Unlike
+	 * `BasePrefsHelper.migrateIfNeeded`, there is deliberately no version-key scheme here: a
+	 * [DataMigration] already answers "have I run?" via `shouldMigrate`, and DataStore applies it
+	 * atomically before the first read rather than racing a stamp afterwards. Adding a second
+	 * mechanism on top would be strictly worse.
+	 *
+	 * ```kotlin
+	 * class AppPrefs(context: Context) : BaseDataStoreHelper(
+	 *     context,
+	 *     "app_prefs",
+	 *     migrations = listOf(SecondsToMillisMigration()),
+	 * )
+	 * ```
+	 *
+	 * @param context Any [Context]; the application context is used internally
+	 * @param preferenceName Name of the preferences data store file
+	 * @param dispatcher The [CoroutineDispatcher] `suspend` functions run on. Does **not** affect the
+	 * store's own IO — see above.
+	 * @param scope The [CoroutineScope] the `*Async` writes are launched in. Note this does not own
+	 * the store's internal actor either, so a `CoroutineExceptionHandler` here sees failures from the
+	 * `*Async` writes, not from DataStore itself.
+	 * @param migrations Migrations run once, before the first read
 	 */
-	@PublishedApi
-	internal val dataStore: DataStore<Preferences> = context.dataStoreInstance
-
-	/**
-	 * Coroutine scope for async operations
-	 */
-	protected val scope = CoroutineScope(coroutineContext)
-
-	//Todo: remove Deprecated methods in future release
-	/**
-	 * Add Boolean to the data store
-	 */
-	@Deprecated("Use writeBoolean instead", ReplaceWith("writeBoolean(key, value)"))
-	protected suspend fun writeBool(key: String, value: Boolean) =
-		writeBoolean(key, value)
-
-	/**
-	 * Add Nullable Boolean to the data store
-	 */
-	@Deprecated("Use writeBoolean instead", ReplaceWith("writeBoolean(key, value)"))
-	protected suspend fun writeBool(key: String, value: Boolean?) = writeBoolean(key, value)
-
-	/**
-	 * Reading the Boolean from the data store
-	 */
-	@Deprecated("Use readBoolean instead", ReplaceWith("readBoolean(key)"))
-	protected fun readNullableBool(key: String): Flow<Boolean?> = readBoolean(key)
-
-	/**
-	 * Reading the Boolean from the data store
-	 */
-	@Deprecated("Use readBoolean(key, default) instead", ReplaceWith("readBoolean(key, true)"))
-	protected fun readBool(key: String): Flow<Boolean> = readBoolean(key, true)
-	//end Deprecated methods
+	constructor(
+		context: Context,
+		preferenceName: String,
+		dispatcher: CoroutineDispatcher = Dispatchers.IO,
+		scope: CoroutineScope = CoroutineScope(dispatcher + SupervisorJob()),
+		migrations: List<DataMigration<Preferences>> = emptyList(),
+	) : this(
+		dataStore = PreferenceDataStoreFactory.create(
+			migrations = migrations,
+			scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+			produceFile = { context.applicationContext.preferencesDataStoreFile(preferenceName) },
+		),
+		dispatcher = dispatcher,
+		scope = scope,
+	)
 
 	/**
 	 * Clear all preferences in the data store.
 	 *
 	 * @return Unit
 	 */
-	open suspend fun clearPrefs(): Unit = withContext(coroutineContext) {
+	open suspend fun clearPrefs(): Unit = withContext(dispatcher) {
 		dataStore.edit { preferences ->
 			preferences.clear()
 		}
@@ -156,7 +179,7 @@ abstract class BaseDataStoreHelper(
 	 * @param value The value to store or null to delete
 	 */
 	@JvmName("writeNullableValue")
-	protected suspend inline fun <reified T> writeValue(key: Preferences.Key<T>, value: T?) = withContext(coroutineContext) {
+	protected suspend inline fun <reified T> writeValue(key: Preferences.Key<T>, value: T?) = withContext(dispatcher) {
 		if (value == null) removeKey(key) else writeValue(key, value)
 	}
 
@@ -205,11 +228,18 @@ abstract class BaseDataStoreHelper(
 	/**
 	 * Generic method to read value from the data store in a blocking way
 	 *
+	 * Blocks the calling thread until the read completes or 2 seconds elapse. The read itself runs
+	 * on the [DataStore]'s own scope, so no dispatcher is imposed here.
+	 *
+	 * Never call this from a thread that the [DataStore]'s scope is itself confined to (for example
+	 * an injected store built on a single-threaded test dispatcher) — the read cannot make progress
+	 * and the call will stall for the full timeout and return null.
+	 *
 	 * @param key The key to read the value for
 	 * @return The value or null if not present
 	 */
 	protected inline fun <reified T> readValueBlocking(key: Preferences.Key<T>): T? =
-		runBlocking(coroutineContext) {
+		runBlocking {
 			withTimeoutOrNull(2.seconds) {
 				dataStore.data.first()[key]
 			}
@@ -356,6 +386,310 @@ abstract class BaseDataStoreHelper(
 	 */
 	protected fun readDoubleValue(key: String, default: Double): Double =
 		readValueBlocking(doublePreferencesKey(key), default)
+
+	/**
+	 * Adding [Float] to the data store
+	 *
+	 * If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	protected suspend fun writeFloat(key: String, value: Float?) =
+		writeValue(floatPreferencesKey(key), value)
+
+	/**
+	 * Add [Float] to the data store asynchronously
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	protected fun writeFloatAsync(key: String, value: Float?): Job =
+		writeValueAsync(floatPreferencesKey(key), value)
+
+	/**
+	 * Reading the [Float] value from the data store
+	 *
+	 * @param key The key to read the value for
+	 * @return Flow of the value or null if not present
+	 */
+	protected fun readFloat(key: String): Flow<Float?> =
+		readValue(floatPreferencesKey(key))
+
+	/**
+	 * Reading the [Float] value from the data store with a default
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key is not present
+	 * @return Flow of the value
+	 */
+	protected fun readFloat(key: String, default: Float): Flow<Float> =
+		readValue(floatPreferencesKey(key), default)
+
+	/**
+	 * Read [Float] value in a blocking way from the data store preferences
+	 *
+	 * @param key The key to read the value for
+	 * @return The value or null if not present
+	 */
+	protected fun readFloatValue(key: String): Float? =
+		readValueBlocking(floatPreferencesKey(key))
+
+	/**
+	 * Read [Float] value in a blocking way from the data store preferences with a default
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key is not present
+	 * @return The value
+	 */
+	protected fun readFloatValue(key: String, default: Float): Float =
+		readValueBlocking(floatPreferencesKey(key), default)
+
+	/**
+	 * Add a [Set] of [String] to the data store
+	 *
+	 * If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	protected suspend fun writeStringSet(key: String, value: Set<String>?) =
+		writeValue(stringSetPreferencesKey(key), value)
+
+	/**
+	 * Add a [Set] of [String] to the data store asynchronously
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	protected fun writeStringSetAsync(key: String, value: Set<String>?): Job =
+		writeValueAsync(stringSetPreferencesKey(key), value)
+
+	/**
+	 * Reading the [Set] of [String] value from the data store
+	 *
+	 * @param key The key to read the value for
+	 * @return Flow of the value or null if not present
+	 */
+	protected fun readStringSet(key: String): Flow<Set<String>?> =
+		readValue(stringSetPreferencesKey(key))
+
+	/**
+	 * Reading the [Set] of [String] value from the data store with a default
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key is not present
+	 * @return Flow of the value
+	 */
+	protected fun readStringSet(key: String, default: Set<String>): Flow<Set<String>> =
+		readValue(stringSetPreferencesKey(key), default)
+
+	/**
+	 * Read a [Set] of [String] in a blocking way from the data store preferences
+	 *
+	 * @param key The key to read the value for
+	 * @return The value or null if not present
+	 */
+	protected fun readStringSetValue(key: String): Set<String>? =
+		readValueBlocking(stringSetPreferencesKey(key))
+
+	/**
+	 * Read a [Set] of [String] in a blocking way from the data store preferences with a default
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key is not present
+	 * @return The value
+	 */
+	protected fun readStringSetValue(key: String, default: Set<String>): Set<String> =
+		readValueBlocking(stringSetPreferencesKey(key), default)
+
+	/**
+	 * Add a [ByteArray] to the data store
+	 *
+	 * If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	protected suspend fun writeByteArray(key: String, value: ByteArray?) =
+		writeValue(byteArrayPreferencesKey(key), value)
+
+	/**
+	 * Add a [ByteArray] to the data store asynchronously
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	protected fun writeByteArrayAsync(key: String, value: ByteArray?): Job =
+		writeValueAsync(byteArrayPreferencesKey(key), value)
+
+	/**
+	 * Reading the [ByteArray] value from the data store
+	 *
+	 * @param key The key to read the value for
+	 * @return Flow of the value or null if not present
+	 */
+	protected fun readByteArray(key: String): Flow<ByteArray?> =
+		readValue(byteArrayPreferencesKey(key))
+
+	/**
+	 * Reading the [ByteArray] value from the data store with a default
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key is not present
+	 * @return Flow of the value
+	 */
+	protected fun readByteArray(key: String, default: ByteArray): Flow<ByteArray> =
+		readValue(byteArrayPreferencesKey(key), default)
+
+	/**
+	 * Read a [ByteArray] in a blocking way from the data store preferences
+	 *
+	 * @param key The key to read the value for
+	 * @return The value or null if not present
+	 */
+	protected fun readByteArrayValue(key: String): ByteArray? =
+		readValueBlocking(byteArrayPreferencesKey(key))
+
+	/**
+	 * Read a [ByteArray] in a blocking way from the data store preferences with a default
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key is not present
+	 * @return The value
+	 */
+	protected fun readByteArrayValue(key: String, default: ByteArray): ByteArray =
+		readValueBlocking(byteArrayPreferencesKey(key), default)
+
+	/**
+	 * Add an [Instant] to the data store
+	 *
+	 * Stored as epoch milliseconds in a [Long]. If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected suspend fun writeInstant(key: String, value: Instant?) =
+		writeValue(longPreferencesKey(key), value?.toEpochMilli())
+
+	/**
+	 * Add an [Instant] to the data store asynchronously
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun writeInstantAsync(key: String, value: Instant?): Job =
+		writeValueAsync(longPreferencesKey(key), value?.toEpochMilli())
+
+	/**
+	 * Read an [Instant] preference as a [Flow].
+	 *
+	 * @param key The key to read the value for
+	 * @return A [Flow] emitting the [Instant] stored under the key, or null if the key does not exist
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun readInstant(key: String): Flow<Instant?> =
+		readValue(longPreferencesKey(key)).map { it?.let { millis -> Instant.ofEpochMilli(millis) } }
+
+	/**
+	 * Read an [Instant] preference as a [Flow] with a non-null default.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key does not exist
+	 * @return A [Flow] emitting the [Instant] stored under the key, or the default value
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun readInstant(key: String, default: Instant): Flow<Instant> =
+		readValue(longPreferencesKey(key)).map { it?.let { millis -> Instant.ofEpochMilli(millis) } ?: default }
+
+	/**
+	 * Read an [Instant] preference in a blocking way.
+	 *
+	 * @param key The key to read the value for
+	 * @return The [Instant] or null if the key does not exist
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun readInstantValue(key: String): Instant? =
+		readValueBlocking(longPreferencesKey(key))?.let { Instant.ofEpochMilli(it) }
+
+	/**
+	 * Read an [Instant] preference in a blocking way with a default value.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key does not exist
+	 * @return The [Instant] stored under the key, or the default value
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun readInstantValue(key: String, default: Instant): Instant =
+		readValueBlocking(longPreferencesKey(key))?.let { Instant.ofEpochMilli(it) } ?: default
+
+	/**
+	 * Add [Date] to the data store
+	 *
+	 * Stored as epoch milliseconds in a [Long]. If value is null, the key will be removed, matching
+	 * `BasePrefsHelper` — which used to write a -1L sentinel here, but stopped doing so in 2.0.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	protected suspend fun writeDate(key: String, value: Date?) =
+		writeValue(longPreferencesKey(key), value?.time)
+
+	/**
+	 * Add [Date] to the data store asynchronously
+	 *
+	 * If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	protected fun writeDateAsync(key: String, value: Date?): Job =
+		writeValueAsync(longPreferencesKey(key), value?.time)
+
+	/**
+	 * Read a [Date] preference as a [Flow].
+	 *
+	 * @param key The key to read the value for
+	 * @return A [Flow] emitting the [Date] stored under the key, or null if the key does not exist
+	 */
+	protected fun readDate(key: String): Flow<Date?> =
+		readValue(longPreferencesKey(key)).map { it?.let { millis -> Date(millis) } }
+
+	/**
+	 * Read a [Date] preference as a [Flow] with a non-null default.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key does not exist
+	 * @return A [Flow] emitting the [Date] stored under the key, or the default value
+	 */
+	protected fun readDate(key: String, default: Date): Flow<Date> =
+		readValue(longPreferencesKey(key)).map { it?.let { millis -> Date(millis) } ?: default }
+
+	/**
+	 * Read a [Date] preference in a blocking way.
+	 *
+	 * @param key The key to read the value for
+	 * @return The [Date] or null if the key does not exist
+	 */
+	protected fun readDateValue(key: String): Date? =
+		readValueBlocking(longPreferencesKey(key))?.let { Date(it) }
+
+	/**
+	 * Read a [Date] preference in a blocking way with a default value.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key does not exist
+	 * @return The [Date] stored under the key, or the default value
+	 */
+	protected fun readDateValue(key: String, default: Date): Date =
+		readValueBlocking(longPreferencesKey(key))?.let { Date(it) } ?: default
 
 	/**
 	 * Add [String] data to data Store
@@ -968,6 +1302,157 @@ abstract class BaseDataStoreHelper(
 	protected fun doublePrefFlow(key: String): Flow<Double?> = readDouble(key)
 
 	/**
+	 * Create a property delegate for a [Float] preference.
+	 */
+	protected fun floatPref(key: String, defaultValue: Float): ReadWriteProperty<Any?, Float> =
+		object : ReadWriteProperty<Any?, Float> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Float = readFloatValue(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Float) {
+				writeFloatAsync(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Float] preference.
+	 */
+	protected fun floatPref(key: String): ReadWriteProperty<Any?, Float?> =
+		object : ReadWriteProperty<Any?, Float?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Float? = readFloatValue(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Float?) {
+				writeFloatAsync(key, value)
+			}
+		}
+
+	/**
+	 * [Flow] accessor for a [Float] preference — alias for [readFloat].
+	 */
+	protected fun floatPrefFlow(key: String, defaultValue: Float): Flow<Float> = readFloat(key, defaultValue)
+
+	/**
+	 * [Flow] accessor for a nullable [Float] preference — alias for [readFloat].
+	 */
+	protected fun floatPrefFlow(key: String): Flow<Float?> = readFloat(key)
+
+	/**
+	 * Create a property delegate for a [Set] of [String] preference.
+	 */
+	protected fun stringSetPref(key: String, defaultValue: Set<String>): ReadWriteProperty<Any?, Set<String>> =
+		object : ReadWriteProperty<Any?, Set<String>> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<String> =
+				readStringSetValue(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<String>) {
+				writeStringSetAsync(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Set] of [String] preference.
+	 */
+	protected fun stringSetPref(key: String): ReadWriteProperty<Any?, Set<String>?> =
+		object : ReadWriteProperty<Any?, Set<String>?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<String>? = readStringSetValue(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<String>?) {
+				writeStringSetAsync(key, value)
+			}
+		}
+
+	/**
+	 * [Flow] accessor for a [Set] of [String] preference — alias for [readStringSet].
+	 */
+	protected fun stringSetPrefFlow(key: String, defaultValue: Set<String>): Flow<Set<String>> =
+		readStringSet(key, defaultValue)
+
+	/**
+	 * [Flow] accessor for a nullable [Set] of [String] preference — alias for [readStringSet].
+	 */
+	protected fun stringSetPrefFlow(key: String): Flow<Set<String>?> = readStringSet(key)
+
+	/**
+	 * Create a property delegate for a nullable [ByteArray] preference.
+	 */
+	protected fun byteArrayPref(key: String): ReadWriteProperty<Any?, ByteArray?> =
+		object : ReadWriteProperty<Any?, ByteArray?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): ByteArray? = readByteArrayValue(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: ByteArray?) {
+				writeByteArrayAsync(key, value)
+			}
+		}
+
+	/**
+	 * [Flow] accessor for a nullable [ByteArray] preference — alias for [readByteArray].
+	 */
+	protected fun byteArrayPrefFlow(key: String): Flow<ByteArray?> = readByteArray(key)
+
+	/**
+	 * Create a property delegate for an [Instant] preference.
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun instantPref(key: String, defaultValue: Instant): ReadWriteProperty<Any?, Instant> =
+		object : ReadWriteProperty<Any?, Instant> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Instant =
+				readInstantValue(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Instant) {
+				writeInstantAsync(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Instant] preference.
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun instantPref(key: String): ReadWriteProperty<Any?, Instant?> =
+		object : ReadWriteProperty<Any?, Instant?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Instant? = readInstantValue(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Instant?) {
+				writeInstantAsync(key, value)
+			}
+		}
+
+	/**
+	 * [Flow] accessor for an [Instant] preference — alias for [readInstant].
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun instantPrefFlow(key: String, defaultValue: Instant): Flow<Instant> = readInstant(key, defaultValue)
+
+	/**
+	 * [Flow] accessor for a nullable [Instant] preference — alias for [readInstant].
+	 */
+	@RequiresApi(Build.VERSION_CODES.O)
+	protected fun instantPrefFlow(key: String): Flow<Instant?> = readInstant(key)
+
+	/**
+	 * Create a property delegate for a [Date] preference.
+	 */
+	protected fun datePref(key: String, defaultValue: Date): ReadWriteProperty<Any?, Date> =
+		object : ReadWriteProperty<Any?, Date> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Date = readDateValue(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Date) {
+				writeDateAsync(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Date] preference.
+	 */
+	protected fun datePref(key: String): ReadWriteProperty<Any?, Date?> =
+		object : ReadWriteProperty<Any?, Date?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Date? = readDateValue(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Date?) {
+				writeDateAsync(key, value)
+			}
+		}
+
+	/**
+	 * [Flow] accessor for a [Date] preference — alias for [readDate].
+	 */
+	protected fun datePrefFlow(key: String, defaultValue: Date): Flow<Date> = readDate(key, defaultValue)
+
+	/**
+	 * [Flow] accessor for a nullable [Date] preference — alias for [readDate].
+	 */
+	protected fun datePrefFlow(key: String): Flow<Date?> = readDate(key)
+
+	/**
 	 * Create a property delegate for a [Boolean] preference.
 	 */
 	protected fun booleanPref(key: String, defaultValue: Boolean): ReadWriteProperty<Any?, Boolean> =
@@ -1171,6 +1656,103 @@ abstract class BaseDataStoreHelper(
 	}
 
 	/**
+	 * Add a [Set] of [Enum] to the data store
+	 *
+	 * Stored as a set of [Enum.name] values. If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	protected suspend fun writeEnumSet(key: String, value: Set<Enum<*>>?) =
+		writeStringSet(key, value?.mapTo(LinkedHashSet()) { it.name })
+
+	/**
+	 * Add a [Set] of [Enum] to the data store asynchronously
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	protected fun writeEnumSetAsync(key: String, value: Set<Enum<*>>?): Job =
+		writeStringSetAsync(key, value?.mapTo(LinkedHashSet()) { it.name })
+
+	/**
+	 * Read a [Set] of [Enum] preference as a [Flow].
+	 *
+	 * Stored names that no longer match a constant of [T] are dropped, so removing an enum constant
+	 * does not break reads of previously stored data.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The value emitted if the key does not exist, defaults to an empty set
+	 */
+	protected inline fun <reified T : Enum<*>> readEnumSet(
+		key: String,
+		default: Set<T> = emptySet(),
+	): Flow<Set<T>> {
+		val constants = T::class.java.enumConstants
+		return readStringSet(key).map { names ->
+			if (names == null) default
+			else names.mapNotNullTo(LinkedHashSet()) { name -> constants?.firstOrNull { it.name == name } }
+		}
+	}
+
+	/**
+	 * Read a [Set] of [Enum] preference in a blocking way.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The value returned if the key does not exist, defaults to an empty set
+	 */
+	protected inline fun <reified T : Enum<*>> readEnumSetValue(
+		key: String,
+		default: Set<T> = emptySet(),
+	): Set<T> {
+		val names = readStringSetValue(key) ?: return default
+		val constants = T::class.java.enumConstants
+		return names.mapNotNullTo(LinkedHashSet()) { name -> constants?.firstOrNull { it.name == name } }
+	}
+
+	/**
+	 * Create a property delegate for a [Set] of [Enum] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected inline fun <reified T : Enum<*>> enumSetPref(
+		key: String,
+		defaultValue: Set<T> = emptySet(),
+	): ReadWriteProperty<Any?, Set<T>> = enumSetPrefInternal(key, defaultValue, T::class.java)
+
+	/**
+	 * Non-inline implementation, for the same reason as [enumPrefInternal] — an anonymous class
+	 * emitted inside the subclass would lose JVM-level access to the protected helpers.
+	 */
+	@PublishedApi
+	internal fun <T : Enum<*>> enumSetPrefInternal(
+		key: String,
+		defaultValue: Set<T>,
+		enumClass: Class<T>,
+	): ReadWriteProperty<Any?, Set<T>> {
+		val constants = enumClass.enumConstants
+		return object : ReadWriteProperty<Any?, Set<T>> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Set<T> {
+				val names = readStringSetValue(key) ?: return defaultValue
+				return names.mapNotNullTo(LinkedHashSet()) { name -> constants?.firstOrNull { it.name == name } }
+			}
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<T>) {
+				writeEnumSetAsync(key, value)
+			}
+		}
+	}
+
+	/**
+	 * [Flow] accessor for a [Set] of [Enum] preference — alias for [readEnumSet].
+	 */
+	protected inline fun <reified T : Enum<*>> enumSetPrefFlow(
+		key: String,
+		defaultValue: Set<T> = emptySet(),
+	): Flow<Set<T>> = readEnumSet(key, defaultValue)
+
+	/**
 	 * [Flow] accessor for an [Enum] preference — alias for [readEnum].
 	 */
 	protected inline fun <reified T : Enum<*>> enumPrefFlow(key: String, default: T): Flow<T> = readEnum(key, default)
@@ -1179,8 +1761,4 @@ abstract class BaseDataStoreHelper(
 	 * [Flow] accessor for a nullable [Enum] preference — alias for [readEnum].
 	 */
 	protected inline fun <reified T : Enum<*>> enumPrefFlow(key: String): Flow<T?> = readEnum(key)
-
-	companion object {
-		val supervisorJob = SupervisorJob()
-	}
 }

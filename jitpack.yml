@@ -1,8 +1,38 @@
+# JitPack release build configuration.
+#
+# JitPack builds a tag the first time someone requests it, then caches the
+# result — so this runs about once per release.
+#
+# `jdk:` selects JitPack's base image, which tops out below what AGP needs, so
+# before_install upgrades via SDKMAN and that is the JDK that actually runs
+# Gradle. Pinned to 21 to match .github/workflows/ci.yml — when CI and the
+# release build run different JDKs, a green CI stops being evidence that the
+# release will build. Keep the two in step. This only affects the toolchain;
+# the artifact still targets JVM 11 (see compileOptions / jvmTarget in
+# PrefsHelper/build.gradle.kts).
+#
+# `install:` overrides JitPack's default, which would be:
+#   ./gradlew clean -Pgroup=$GROUP -Pversion=$VERSION -xtest -xlint assemble publishToMavenLocal
+# That `assemble` builds the :app sample module too — something that is never
+# published. Scoping to :PrefsHelper drops the build from 158 executed tasks to
+# 31 (measured: 2.0.0-beta01 vs 2.0.0-beta02 build logs). Wall time barely moves
+# on JitPack, because a cold build there is dominated by downloading the Gradle
+# distribution and resolving dependencies, not by task execution — the win is
+# in work done and things that can break, not minutes.
+#
+# GROUP and VERSION are JitPack-provided environment variables and MUST be
+# passed through, or the artifact publishes as "unspecified".
+#
+# Only :PrefsHelper applies maven-publish, so it remains the single published
+# module and consumers keep resolving it as com.github.projectdelta6:PrefsHelperBase.
+
 jdk:
   - openjdk11
+
 before_install:
   - sdk update
-  - sdk install java 17.0.6-amzn
-  - sdk use java 17.0.6-amzn
-  - sdk install maven
-  - mvn -v
+  - sdk install java 21.0.12-amzn
+  - sdk use java 21.0.12-amzn
+
+install:
+  - ./gradlew clean :PrefsHelper:publishToMavenLocal -Pgroup=$GROUP -Pversion=$VERSION -xtest -xlint
