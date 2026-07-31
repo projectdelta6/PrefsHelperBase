@@ -11,9 +11,10 @@ import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import com.duck.prefshelper.BaseDataStoreHelper.Companion.supervisorJob
+import androidx.datastore.preferences.preferencesDataStoreFile
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,7 +30,6 @@ import kotlin.time.Duration.Companion.seconds
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import kotlin.coroutines.CoroutineContext
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -40,38 +40,55 @@ import kotlin.reflect.KProperty
  * Provides generic methods to read and write various data types.
  * Includes methods for blocking reads with timeouts.
  *
- * BaseDataStoreHelper uses a coroutine context for background operations.
- * By default, it uses [Dispatchers.IO] + [supervisorJob]. If you need custom job management,
- * pass a context with your own Job or SupervisorJob. Avoid passing a new Job per instance
- * unless you manage its lifecycle explicitly.
+ * Coroutine usage is split across two independent parameters:
  *
- * @param context Application context
- * @param preferenceName Name of the preferences data store
- * @param coroutineContext Coroutine context for async operations
+ * - [dispatcher] decides where `suspend` functions do their work ([withContext]). It carries no
+ *   [Job], so cancelling the caller correctly cancels the work.
+ * - [scope] owns the fire-and-forget `*Async` writes. Inject an application-lifetime scope — for
+ *   example one provided by your DI container with a `CoroutineExceptionHandler` attached — if you
+ *   want async write failures reported rather than thrown into a bare [SupervisorJob].
+ *
+ * The default [scope] is created per instance, so cancelling one helper's scope never affects
+ * another's.
+ *
+ * Each instance owns exactly one [DataStore]. As with the DataStore library itself, there must
+ * only ever be a single active [DataStore] per file in a process — keep subclasses singletons.
+ *
+ * @param dataStore The [DataStore] backing this helper
+ * @param dispatcher The [CoroutineDispatcher] `suspend` functions run on, defaults to [Dispatchers.IO]
+ * @param scope The [CoroutineScope] the `*Async` writes are launched in, defaults to a per-instance
+ * scope of [dispatcher] + [SupervisorJob]
  */
 abstract class BaseDataStoreHelper(
-	context: Context,
-	preferenceName: String,
-	@PublishedApi internal val coroutineContext: CoroutineContext = Dispatchers.IO + supervisorJob
+	@PublishedApi internal val dataStore: DataStore<Preferences>,
+	@PublishedApi internal val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+	protected val scope: CoroutineScope = CoroutineScope(dispatcher + SupervisorJob()),
 ) {
 	/**
-	 * DataStore instance
-	 */
-	private val Context.dataStoreInstance: DataStore<Preferences> by preferencesDataStore(name = preferenceName)
-
-	/**
-	 * DataStore reference
+	 * Creates a helper backed by a Preferences DataStore file named [preferenceName].
 	 *
-	 * Internal visibility allows testing while keeping it hidden from library consumers.
-	 * This is accessed by inline functions which require it to be internal or public.
+	 * This is the convenience path for production code. To supply your own [DataStore] — for
+	 * deterministic unit tests, or to configure migrations or a corruption handler — use the
+	 * primary constructor instead.
+	 *
+	 * @param context Any [Context]; the application context is used internally
+	 * @param preferenceName Name of the preferences data store file
+	 * @param dispatcher The [CoroutineDispatcher] `suspend` functions and the DataStore's own IO run on
+	 * @param scope The [CoroutineScope] the `*Async` writes are launched in
 	 */
-	@PublishedApi
-	internal val dataStore: DataStore<Preferences> = context.dataStoreInstance
-
-	/**
-	 * Coroutine scope for async operations
-	 */
-	protected val scope = CoroutineScope(coroutineContext)
+	constructor(
+		context: Context,
+		preferenceName: String,
+		dispatcher: CoroutineDispatcher = Dispatchers.IO,
+		scope: CoroutineScope = CoroutineScope(dispatcher + SupervisorJob()),
+	) : this(
+		dataStore = PreferenceDataStoreFactory.create(
+			scope = CoroutineScope(dispatcher + SupervisorJob()),
+			produceFile = { context.applicationContext.preferencesDataStoreFile(preferenceName) },
+		),
+		dispatcher = dispatcher,
+		scope = scope,
+	)
 
 	//Todo: remove Deprecated methods in future release
 	/**
@@ -105,7 +122,7 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * @return Unit
 	 */
-	open suspend fun clearPrefs(): Unit = withContext(coroutineContext) {
+	open suspend fun clearPrefs(): Unit = withContext(dispatcher) {
 		dataStore.edit { preferences ->
 			preferences.clear()
 		}
@@ -156,7 +173,7 @@ abstract class BaseDataStoreHelper(
 	 * @param value The value to store or null to delete
 	 */
 	@JvmName("writeNullableValue")
-	protected suspend inline fun <reified T> writeValue(key: Preferences.Key<T>, value: T?) = withContext(coroutineContext) {
+	protected suspend inline fun <reified T> writeValue(key: Preferences.Key<T>, value: T?) = withContext(dispatcher) {
 		if (value == null) removeKey(key) else writeValue(key, value)
 	}
 
@@ -205,11 +222,18 @@ abstract class BaseDataStoreHelper(
 	/**
 	 * Generic method to read value from the data store in a blocking way
 	 *
+	 * Blocks the calling thread until the read completes or 2 seconds elapse. The read itself runs
+	 * on the [DataStore]'s own scope, so no dispatcher is imposed here.
+	 *
+	 * Never call this from a thread that the [DataStore]'s scope is itself confined to (for example
+	 * an injected store built on a single-threaded test dispatcher) — the read cannot make progress
+	 * and the call will stall for the full timeout and return null.
+	 *
 	 * @param key The key to read the value for
 	 * @return The value or null if not present
 	 */
 	protected inline fun <reified T> readValueBlocking(key: Preferences.Key<T>): T? =
-		runBlocking(coroutineContext) {
+		runBlocking {
 			withTimeoutOrNull(2.seconds) {
 				dataStore.data.first()[key]
 			}
@@ -1179,8 +1203,4 @@ abstract class BaseDataStoreHelper(
 	 * [Flow] accessor for a nullable [Enum] preference — alias for [readEnum].
 	 */
 	protected inline fun <reified T : Enum<*>> enumPrefFlow(key: String): Flow<T?> = readEnum(key)
-
-	companion object {
-		val supervisorJob = SupervisorJob()
-	}
 }

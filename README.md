@@ -63,6 +63,70 @@ class AppPrefs(context: Context) : BaseDataStoreHelper(context, "app_prefs") {
 }
 ```
 
+### Coroutines: `dispatcher` and `scope`
+
+Both base classes take a `dispatcher`; `BaseDataStoreHelper` also takes a `scope`. They do two separate jobs and neither defaults will surprise you:
+
+| Parameter | Used for | Default |
+|-----------|----------|---------|
+| `dispatcher` | Where `suspend` functions do their work (`withContext(dispatcher)`) | `Dispatchers.IO` |
+| `scope` | Where fire-and-forget `*Async` writes (and the delegate setters) launch | Per-instance `CoroutineScope(dispatcher + SupervisorJob())` |
+
+`dispatcher` deliberately carries no `Job`, so a `suspend` call like `clearPrefs()` is cancelled when its caller is cancelled — see the migration note below, this matters.
+
+Inject `scope` when you want async write failures to go somewhere. A bare `SupervisorJob` swallows nothing but has no handler, so an exception from a fire-and-forget write reaches the thread's default handler and takes the process with it. Hand in an application-lifetime scope with a `CoroutineExceptionHandler` instead:
+
+```kotlin
+// Koin, but any DI container works the same way
+single(named("appScope")) {
+    CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, t ->
+            Crashlytics.recordException(t)
+        },
+    )
+}
+
+single { AppPrefs(get(), get(named("appScope"))) }
+
+class AppPrefs(
+    context: Context,
+    appScope: CoroutineScope,
+) : BaseDataStoreHelper(context, "app_prefs", scope = appScope) {
+    // …
+}
+```
+
+### Injecting a `DataStore` for tests
+
+`BaseDataStoreHelper`'s primary constructor takes the `DataStore<Preferences>` directly, so tests can supply one backed by a temp file and a test scheduler and drop the sleep-and-hope pattern entirely. Forward both constructors from your subclass:
+
+```kotlin
+class AppPrefs : BaseDataStoreHelper {
+    constructor(context: Context) : super(context, "app_prefs")
+
+    constructor(
+        dataStore: DataStore<Preferences>,
+        dispatcher: CoroutineDispatcher,
+        scope: CoroutineScope,
+    ) : super(dataStore, dispatcher, scope)
+
+    var userId by intPref(KEY_USER_ID, defaultValue = -1)
+    // …
+}
+```
+
+Then, in a test:
+
+```kotlin
+val store = PreferenceDataStoreFactory.create(
+    scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler) + Job()),
+    produceFile = { tempFolder.newFile("test.preferences_pb") },
+)
+val prefs = AppPrefs(store, StandardTestDispatcher(testScheduler), backgroundScope)
+```
+
+Give every test a fresh file — DataStore throws if two live instances point at the same one — and cancel the store's scope in teardown to release the file lock.
+
 ### Composing a single façade
 
 When an app stores preferences across several backing files (e.g. a per-user SharedPreferences plus a device-wide DataStore), it's convenient to wrap them in one façade so consumers only inject one type and cross-cutting operations (like "clear everything on logout") live in one place. Each property on the façade can re-expose a sub-helper's delegate via a Kotlin property reference (`by subHelper::property`):
@@ -92,6 +156,58 @@ Both `BasePrefsHelper` and `BaseDataStoreHelper` support `String`, `Int`, `Long`
 - `BaseDataStoreHelper` supports `Double`.
 
 Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)` (assigning `null` clears the stored value on DataStore, or stores the sentinel on SharedPreferences for temporal types). `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads.
+
+## Migrating to 2.0
+
+2.0 splits the single `coroutineContext` constructor parameter, which was doing two unrelated jobs, into a `dispatcher` and a `scope`. There is no back-compat shim: deriving a dispatcher back out of an arbitrary `CoroutineContext` is exactly the fragile guesswork this change exists to remove.
+
+**Most subclasses need no change at all.** If you extend `BasePrefsHelper()` or `BaseDataStoreHelper(context, "name")` without passing a context, you are already on the new defaults.
+
+### 1. `coroutineContext` → `dispatcher` (+ optional `scope`)
+
+```kotlin
+// Before
+class AppPrefs(context: Context) : BaseDataStoreHelper(
+    context, "app_prefs", Dispatchers.IO + SupervisorJob() + handler,
+)
+
+// After
+class AppPrefs(context: Context, appScope: CoroutineScope) : BaseDataStoreHelper(
+    context, "app_prefs", dispatcher = Dispatchers.IO, scope = appScope,
+)
+```
+
+Attaching a `CoroutineExceptionHandler` is now the `scope`'s job, not the dispatcher's — which is the point.
+
+### 2. `suspend` functions are now caller-cancellable — audit your call sites
+
+This is a real behaviour change, not a refactor. Previously `withContext(coroutineContext)` reparented the work onto a foreign `Job`, so `clearPrefs()` and the suspending writes behaved like `NonCancellable`: they finished even if the caller was cancelled. They no longer do.
+
+The failure mode this creates is a partial logout. Given:
+
+```kotlin
+suspend fun onLogout() {
+    userPrefs.clearPrefs()
+    appPrefs.clearPrefs()
+    apiClient.reset()
+}
+```
+
+if that runs on a screen-scoped coroutine (`viewModelScope`, `screenModelScope`) and the user navigates away mid-call, you can now end up with SharedPreferences cleared and DataStore not. Fix it deliberately — either run logout on an application-lifetime scope, or wrap the body:
+
+```kotlin
+suspend fun onLogout() = withContext(NonCancellable) { … }
+```
+
+Anywhere else you relied on a prefs write surviving its caller's cancellation needs the same treatment.
+
+### 3. The shared `supervisorJob` is gone
+
+`BasePrefsHelper.Companion.supervisorJob` and `BaseDataStoreHelper.Companion.supervisorJob` have been deleted. They were `companion val`s — one `Job` shared by every helper instance in the process, so cancelling it once silently and permanently stopped async writes everywhere. The default `Job` is now created per instance. Nothing is expected to reference these, but grep for `supervisorJob` before upgrading.
+
+### 4. `readValueBlocking` no longer runs on `Dispatchers.IO`
+
+DataStore is already main-safe, so the hop bought nothing and the `Job` it carried made the blocking read cancellable process-wide by accident. It now uses a plain `runBlocking`. One caveat: never call it from a thread the backing `DataStore`'s own scope is confined to — the read can't make progress and you'll block for the full 2-second timeout and get `null`.
 
 ## R8 / ProGuard / Minification
 

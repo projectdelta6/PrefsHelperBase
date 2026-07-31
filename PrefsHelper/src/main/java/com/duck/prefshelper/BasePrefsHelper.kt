@@ -5,9 +5,8 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
-import com.duck.prefshelper.BasePrefsHelper.Companion.supervisorJob
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -16,7 +15,6 @@ import java.time.ZoneOffset
 import java.util.Date
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
-import kotlin.coroutines.CoroutineContext
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -26,15 +24,14 @@ import kotlin.reflect.KProperty
  * Provides common functionality for storing and retrieving preferences of various types
  * including String, Int, Long, Date, Boolean, LocalDateTime, LocalDate, LocalTime, and Enum.
  *
- * BasePrefsHelper uses a coroutine context for background operations.
- * By default, it uses [Dispatchers.IO] + [supervisorJob]. If you need custom job management,
- * pass a context with your own Job or SupervisorJob. Avoid passing a new Job per instance
- * unless you manage its lifecycle explicitly.
+ * Reads and writes are synchronous; only [clearPrefs] does blocking work, and it hops to
+ * [dispatcher] to do it. The dispatcher carries no [kotlinx.coroutines.Job], so cancelling the
+ * caller correctly cancels the clear.
  *
- * @param coroutineContext The [CoroutineContext] to use for suspend functions, defaults to [Dispatchers.IO] with a [SupervisorJob]
+ * @param dispatcher The [CoroutineDispatcher] `suspend` functions run on, defaults to [Dispatchers.IO]
  */
 abstract class BasePrefsHelper(
-	protected val coroutineContext: CoroutineContext = Dispatchers.IO + supervisorJob
+	protected val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 	/**
 	 * The [SharedPreferences] instance to use
@@ -44,7 +41,7 @@ abstract class BasePrefsHelper(
 	/**
 	 * Clear all preferences
 	 */
-	open suspend fun clearPrefs(): Unit = withContext(coroutineContext) {
+	open suspend fun clearPrefs(): Unit = withContext(dispatcher) {
 		sharedPreferences.edit(commit = true) { clear() }
 	}
 
@@ -455,9 +452,5 @@ abstract class BasePrefsHelper(
 			}
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: T?) = setEnum(key, value)
 		}
-	}
-
-	companion object {
-		val supervisorJob = SupervisorJob()
 	}
 }

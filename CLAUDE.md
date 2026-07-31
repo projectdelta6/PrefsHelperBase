@@ -43,7 +43,7 @@ The library provides two abstract base classes that consumers extend:
 - Wraps Android `SharedPreferences` with type-safe getters/setters
 - Synchronous API for reads, async writes via `edit {}`
 - Subclasses must provide `sharedPreferences` instance
-- Uses coroutine context (defaults to `Dispatchers.IO + SupervisorJob`) for `clearPrefs()`
+- Takes a `dispatcher: CoroutineDispatcher = Dispatchers.IO` (no `Job`), used by `clearPrefs()`. Because the dispatcher carries no Job, `clearPrefs()` is cancelled when its caller is cancelled — this is deliberate, see the 2.0 migration note in the README.
 - Preferred usage is the `*Pref` property delegate factories (e.g. `var flag by booleanPref(KEY, defaultValue = false)`). Each type has a non-nullable overload `(key, defaultValue)` and a nullable overload `(key)`. Temporal types (`Date`, `LocalDateTime`, `LocalDate`, `LocalTime`) are nullable-only and preserve the existing -1L sentinel.
 
 ### BaseDataStoreHelper
@@ -51,7 +51,9 @@ The library provides two abstract base classes that consumers extend:
 - Wraps Jetpack `DataStore<Preferences>` with type-safe methods
 - Returns `Flow<T>` for reactive reads, plus blocking `readXxxValue()` methods (2s timeout)
 - Both suspend and async write methods. The `writeXxxAsync` methods launch on `scope` and **return the `Job`**, so callers (and tests) can `.join()` to await completion instead of guessing with a delay. Delegate setters discard the `Job` (property setters return `Unit`), so they remain genuinely fire-and-forget.
-- Subclasses pass `Context` and preference name to constructor
+- **Two constructors.** Primary takes `(dataStore: DataStore<Preferences>, dispatcher, scope)` — the injectable path, used by tests. Secondary convenience constructor takes `(context, preferenceName, dispatcher, scope)` and builds the store via `PreferenceDataStoreFactory.create(produceFile = { context.applicationContext.preferencesDataStoreFile(name) })`. Subclasses written against the old `(context, name)` signature are unchanged.
+- `dispatcher` (no `Job`) is where `suspend` functions work; `scope` is where the `*Async` writes launch and is injectable so consumers can supply an app-lifetime scope with a `CoroutineExceptionHandler`. The default `scope` is per-instance — there is no longer a shared companion `SupervisorJob`.
+- As with DataStore itself, only one live instance per backing file per process — keep subclasses singletons.
 - Null values remove the key from storage
 - Preferred usage is the `*Pref` delegate + `*PrefFlow` alias pair (e.g. `var userId by intPref(KEY, defaultValue = -1)` paired with `val userIdFlow = intPrefFlow(KEY, defaultValue = -1)`). Delegate setters route through the existing `*Async` writes so callers don't need to build their own `CoroutineScope`.
 
