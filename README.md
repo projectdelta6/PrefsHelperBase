@@ -161,7 +161,15 @@ Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nulla
 
 2.0 splits the single `coroutineContext` constructor parameter, which was doing two unrelated jobs, into a `dispatcher` and a `scope`. There is no back-compat shim: deriving a dispatcher back out of an arbitrary `CoroutineContext` is exactly the fragile guesswork this change exists to remove.
 
-**Most subclasses need no change at all.** If you extend `BasePrefsHelper()` or `BaseDataStoreHelper(context, "name")` without passing a context, you are already on the new defaults.
+**Most subclasses need no change at all.** If you extend `BasePrefsHelper()` or `BaseDataStoreHelper(context, "name")` without passing a coroutine context of your own, you are already on the new defaults.
+
+**Only one item on this list can change behaviour without the compiler telling you: item 2.** Everything else is a removed or retyped symbol, so it fails the build and you'll find it immediately. Read item 2 properly.
+
+A beta is published for testing ahead of the 2.0.0 release:
+
+```kotlin
+implementation("com.github.projectdelta6:PrefsHelperBase:2.0.0-beta01")
+```
 
 ### 1. `coroutineContext` → `dispatcher` (+ optional `scope`)
 
@@ -221,6 +229,10 @@ Mind the last one: `readBool(key)` defaulted to **`true`**, not `false`, and `re
 ### 5. `readValueBlocking` no longer runs on `Dispatchers.IO`
 
 DataStore is already main-safe, so the hop bought nothing and the `Job` it carried made the blocking read cancellable process-wide by accident. It now uses a plain `runBlocking`. One caveat: never call it from a thread the backing `DataStore`'s own scope is confined to — the read can't make progress and you'll block for the full 2-second timeout and get `null`.
+
+### 6. New, not breaking: the `DataStore` is injectable
+
+`BaseDataStoreHelper`'s primary constructor now takes a `DataStore<Preferences>` directly. Nothing forces you to use it — the `(context, preferenceName)` convenience constructor is unchanged — but it's what finally makes DataStore-backed subclasses unit-testable without sleeps. See [Injecting a `DataStore` for tests](#injecting-a-datastore-for-tests).
 
 ## R8 / ProGuard / Minification
 
