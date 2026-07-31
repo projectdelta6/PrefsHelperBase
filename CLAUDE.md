@@ -57,7 +57,11 @@ The library provides two abstract base classes that consumers extend:
 - Null values remove the key from storage
 - Preferred usage is the `*Pref` delegate + `*PrefFlow` alias pair (e.g. `var userId by intPref(KEY, defaultValue = -1)` paired with `val userIdFlow = intPrefFlow(KEY, defaultValue = -1)`). Delegate setters route through the existing `*Async` writes so callers don't need to build their own `CoroutineScope`.
 
-Both classes support: `String`, `Int`, `Long`, `Boolean`, `LocalDateTime`, `LocalDate`, `LocalTime`, `Enum<*>`. `BasePrefsHelper` additionally supports `Date`; `BaseDataStoreHelper` additionally supports `Double`.
+Both classes support the same types as of 2.0: `String`, `Int`, `Long`, `Double`, `Boolean`, `Date`, `LocalDateTime`, `LocalDate`, `LocalTime`, `Enum<*>`.
+
+Storage conventions still differ by backend, and deliberately so:
+- **`Double` on `BasePrefsHelper`** is stored as raw IEEE-754 bits via `putLong`/`Double.fromBits`, because `SharedPreferences` has no double primitive. Reading that key with `getLong` returns the bit pattern, not the number.
+- **`Date` on `BaseDataStoreHelper`** is epoch millis in a `longPreferencesKey`, and null removes the key — unlike `BasePrefsHelper`, whose temporal types use the `-1L` sentinel and therefore cannot represent `Date(-1L)` distinctly from null.
 
 ## Gotchas
 

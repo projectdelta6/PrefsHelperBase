@@ -89,6 +89,58 @@ class BaseDataStoreHelperTest {
 	}
 
 	@Test
+	fun testWriteAndReadDate() = runBlocking {
+		val date = java.util.Date(1_700_000_000_000L)
+		dataStoreHelper.testWriteDate("date_key", date)
+		assertEquals(date, dataStoreHelper.testReadDateValue("date_key"))
+	}
+
+	/**
+	 * Date is stored as epoch millis, so it must survive the epoch itself and pre-epoch (negative)
+	 * values — the case a naive -1L sentinel would corrupt.
+	 */
+	@Test
+	fun testDateBoundaryValues() = runBlocking {
+		val epoch = java.util.Date(0L)
+		dataStoreHelper.testWriteDate("epoch", epoch)
+		assertEquals(epoch, dataStoreHelper.testReadDateValue("epoch"))
+
+		val preEpoch = java.util.Date(-1L)
+		dataStoreHelper.testWriteDate("pre_epoch", preEpoch)
+		assertEquals(preEpoch, dataStoreHelper.testReadDateValue("pre_epoch"))
+	}
+
+	@Test
+	fun testWriteNullDateRemovesKey() = runBlocking {
+		dataStoreHelper.testWriteDate("null_date_key", java.util.Date(1_700_000_000_000L))
+		assertNotNull(dataStoreHelper.testReadDateValue("null_date_key"))
+
+		dataStoreHelper.testWriteDate("null_date_key", null)
+		assertNull(dataStoreHelper.testReadDateValue("null_date_key"))
+	}
+
+	@Test
+	fun testReadDateFlow() = runBlocking {
+		val date = java.util.Date(1_600_000_000_000L)
+		dataStoreHelper.testWriteDate("date_flow_key", date)
+		assertEquals(date, dataStoreHelper.testReadDateFlow("date_flow_key").first())
+	}
+
+	@Test
+	fun testReadDateValueWithDefault() = runBlocking {
+		val fallback = java.util.Date(42L)
+		assertEquals(fallback, dataStoreHelper.testReadDateValueWithDefault("no_such_date", fallback))
+		assertEquals(fallback, dataStoreHelper.testReadDateFlowWithDefault("no_such_date", fallback).first())
+	}
+
+	@Test
+	fun testWriteDateAsync() = runBlocking {
+		val date = java.util.Date(1_500_000_000_000L)
+		dataStoreHelper.testWriteDateAsync("date_async_key", date).join()
+		assertEquals(date, dataStoreHelper.testReadDateValue("date_async_key"))
+	}
+
+	@Test
 	fun testWriteAndReadBoolean() = runBlocking {
 		dataStoreHelper.testWriteBoolean("bool_key", true)
 		val value = dataStoreHelper.testReadBooleanValue("bool_key")
@@ -904,6 +956,13 @@ class BaseDataStoreHelperTest {
 		fun testReadDoubleFlow(key: String) = readDouble(key)
 		fun testReadDoubleFlowWithDefault(key: String, default: Double) = readDouble(key, default)
 		fun testWriteDoubleAsync(key: String, value: Double?) = writeDoubleAsync(key, value)
+
+		suspend fun testWriteDate(key: String, value: java.util.Date?) = writeDate(key, value)
+		fun testReadDateValue(key: String) = readDateValue(key)
+		fun testReadDateValueWithDefault(key: String, default: java.util.Date) = readDateValue(key, default)
+		fun testReadDateFlow(key: String) = readDate(key)
+		fun testReadDateFlowWithDefault(key: String, default: java.util.Date) = readDate(key, default)
+		fun testWriteDateAsync(key: String, value: java.util.Date?) = writeDateAsync(key, value)
 
 		suspend fun testWriteBoolean(key: String, value: Boolean?) = writeBoolean(key, value)
 		fun testReadBooleanValue(key: String) = readBooleanValue(key)

@@ -88,6 +88,49 @@ class BasePrefsHelperTest {
 	}
 
 	@Test
+	fun testSetDouble() {
+		prefsHelper.setDouble("key", 3.14)
+		// SharedPreferences has no double primitive — stored as raw IEEE-754 bits in a Long.
+		verify(mockEditor).putLong("key", 3.14.toRawBits())
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testGetDouble() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("key", 0L)).thenReturn(3.14.toRawBits())
+		assertEquals(3.14, prefsHelper.getDouble("key"), 0.0)
+	}
+
+	@Test
+	fun testGetDoubleReturnsDefaultWhenKeyAbsent() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(false)
+		assertEquals(2.5, prefsHelper.getDouble("key", 2.5), 0.0)
+	}
+
+	/**
+	 * The raw-bits encoding must round-trip every double exactly, including the values a
+	 * lossy Float-based encoding would mangle. Mirrors the Double coverage
+	 * `BaseDataStoreHelperTest` has, so both helpers are held to the same standard.
+	 */
+	@Test
+	fun testDoubleBitEncodingRoundTripsExactly() {
+		val values = listOf(
+			0.0,
+			-0.0,
+			3.14159265358979,
+			Double.MAX_VALUE,
+			Double.MIN_VALUE,
+			Double.POSITIVE_INFINITY,
+			Double.NEGATIVE_INFINITY,
+		)
+		for (value in values) {
+			assertEquals(value, Double.fromBits(value.toRawBits()), 0.0)
+		}
+		assertTrue(Double.fromBits(Double.NaN.toRawBits()).isNaN())
+	}
+
+	@Test
 	fun testGetBoolean() {
 		`when`(mockSharedPreferences.getBoolean("key", false)).thenReturn(true)
 		assertTrue(prefsHelper.getBoolean("key", false))
@@ -460,6 +503,47 @@ class BasePrefsHelperTest {
 		verify(mockEditor).apply()
 	}
 
+	// Double delegate
+	@Test
+	fun testDoublePrefDelegateGet() {
+		`when`(mockSharedPreferences.contains("double_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("double_key", 0L)).thenReturn(9.75.toRawBits())
+		assertEquals(9.75, prefsHelper.doubleValue, 0.0)
+	}
+
+	@Test
+	fun testDoublePrefDelegateFallsBackToDefault() {
+		`when`(mockSharedPreferences.contains("double_key")).thenReturn(false)
+		assertEquals(1.5, prefsHelper.doubleValue, 0.0)
+	}
+
+	@Test
+	fun testDoublePrefDelegateSet() {
+		prefsHelper.doubleValue = 2.25
+		verify(mockEditor).putLong("double_key", 2.25.toRawBits())
+		verify(mockEditor).apply()
+	}
+
+	@Test
+	fun testNullableDoublePrefReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("nullable_double_key")).thenReturn(false)
+		assertNull(prefsHelper.nullableDouble)
+	}
+
+	@Test
+	fun testNullableDoublePrefReturnsValueWhenPresent() {
+		`when`(mockSharedPreferences.contains("nullable_double_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("nullable_double_key", 0L)).thenReturn((-0.5).toRawBits())
+		assertEquals(-0.5, prefsHelper.nullableDouble!!, 0.0)
+	}
+
+	@Test
+	fun testNullableDoublePrefRemovesKeyOnNullAssignment() {
+		prefsHelper.nullableDouble = null
+		verify(mockEditor).remove("nullable_double_key")
+		verify(mockEditor).apply()
+	}
+
 	// Boolean delegate
 	@Test
 	fun testBooleanPrefDelegateGet() {
@@ -603,6 +687,8 @@ class BasePrefsHelperTest {
 		var maybeInt by intPref("maybe_int")
 		var longValue by longPref("long_key", defaultValue = 5L)
 		var nullableLong by longPref("nullable_long_key")
+		var doubleValue by doublePref("double_key", defaultValue = 1.5)
+		var nullableDouble by doublePref("nullable_double_key")
 		var boolValue by booleanPref("bool_key", defaultValue = true)
 		var nullableBool by booleanPref("nullable_bool_key")
 		var dateValue by datePref("date_delegate_key")

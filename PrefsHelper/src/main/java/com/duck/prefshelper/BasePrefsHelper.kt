@@ -119,6 +119,33 @@ abstract class BasePrefsHelper(
 	}
 
 	/**
+	 * Set a [Double] preference
+	 *
+	 * [SharedPreferences] has no double primitive, so the value is stored as its raw IEEE-754 bit
+	 * pattern in a [Long]. Always read it back with [getDouble] — calling [getLong] on the same key
+	 * returns the bit pattern, not the number.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	fun setDouble(key: String, value: Double) {
+		sharedPreferences.edit {
+			putLong(key, value.toRawBits())
+		}
+	}
+
+	/**
+	 * Get a [Double] preference
+	 *
+	 * @param key The key to get the value for
+	 * @param defValue The default value to return if the key does not exist, defaults to 0.0
+	 */
+	fun getDouble(key: String, defValue: Double = 0.0): Double {
+		if (!sharedPreferences.contains(key)) return defValue
+		return Double.fromBits(sharedPreferences.getLong(key, 0L))
+	}
+
+	/**
 	 * Set a [Date] preference
 	 *
 	 * @param key The key to store the value under
@@ -343,6 +370,32 @@ abstract class BasePrefsHelper(
 				if (contains(key)) getLong(key) else null
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Long?) {
 				if (value == null) sharedPreferences.edit { remove(key) } else setLong(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a [Double] preference.
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent
+	 */
+	protected fun doublePref(key: String, defaultValue: Double): ReadWriteProperty<Any?, Double> =
+		object : ReadWriteProperty<Any?, Double> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Double = getDouble(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Double) = setDouble(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Double] preference.
+	 *
+	 * Returns null when the key is absent. Assigning null removes the key.
+	 */
+	protected fun doublePref(key: String): ReadWriteProperty<Any?, Double?> =
+		object : ReadWriteProperty<Any?, Double?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Double? =
+				if (contains(key)) getDouble(key) else null
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Double?) {
+				if (value == null) sharedPreferences.edit { remove(key) } else setDouble(key, value)
 			}
 		}
 

@@ -166,12 +166,21 @@ class PrefsHelper(context: Context) {
 
 ## Supported types
 
-Both `BasePrefsHelper` and `BaseDataStoreHelper` support `String`, `Int`, `Long`, `Boolean`, `LocalDateTime`, `LocalDate`, `LocalTime`, and `Enum<*>`. In addition:
+`BasePrefsHelper` and `BaseDataStoreHelper` support the same set of types as of 2.0:
 
-- `BasePrefsHelper` supports `Date`.
-- `BaseDataStoreHelper` supports `Double`.
+`String`, `Int`, `Long`, `Double`, `Boolean`, `Date`, `LocalDateTime`, `LocalDate`, `LocalTime`, and `Enum<*>`.
 
-Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)` (assigning `null` clears the stored value on DataStore, or stores the sentinel on SharedPreferences for temporal types). `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads.
+Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)`. `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads.
+
+The types match, but the two backends still store and clear them differently — that's inherent to `SharedPreferences` versus `DataStore`, not an oversight:
+
+| | `BasePrefsHelper` | `BaseDataStoreHelper` |
+|---|---|---|
+| Assigning `null` | Removes the key for `String`/`Int`/`Long`/`Double`/`Boolean`; writes a `-1L` sentinel for the temporal types | Always removes the key |
+| `Double` storage | Raw IEEE-754 bits in a `Long` — `SharedPreferences` has no double primitive, so never read the key back with `getLong` | Native `doublePreferencesKey` |
+| `Date` storage | Epoch millis, with `-1L` doubling as "absent" | Epoch millis in a `Long`, absent means absent |
+
+That last row matters if you store pre-epoch dates: `BasePrefsHelper` cannot distinguish `Date(-1L)` from null, `BaseDataStoreHelper` can.
 
 ## Migrating to 2.0
 
@@ -180,12 +189,6 @@ Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nulla
 **Most subclasses need no change at all.** If you extend `BasePrefsHelper()` or `BaseDataStoreHelper(context, "name")` without passing a coroutine context of your own, you are already on the new defaults.
 
 **Two items on this list change behaviour without the compiler telling you: items 2 and 5.** The rest are removed or retyped symbols, so they fail the build and you'll find them immediately. Item 2 is the one that can corrupt state — read it properly. Item 5 only bites a specific threading arrangement.
-
-A beta is published for testing ahead of the 2.0.0 release:
-
-```kotlin
-implementation("com.github.projectdelta6:PrefsHelperBase:2.0.0-beta03")
-```
 
 ### 1. `coroutineContext` → `dispatcher` (+ optional `scope`)
 
@@ -253,6 +256,10 @@ DataStore is already main-safe, so the hop bought nothing and the `Job` it carri
 `BaseDataStoreHelper`'s primary constructor now takes a `DataStore<Preferences>` directly. Nothing forces you to use it — the `(context, preferenceName)` convenience constructor is unchanged, in signature *and* in scheduling — but it's what finally makes DataStore-backed subclasses unit-testable without sleeps. See [Injecting a `DataStore` for tests](#injecting-a-datastore-for-tests).
 
 The convenience constructor deliberately keeps the store's own internal actor on `Dispatchers.IO` whatever `dispatcher` you pass, exactly as the old `preferencesDataStore` delegate did. Binding the store to a caller-supplied dispatcher would be a silent behaviour change, and a confined one (`Main`, single-threaded, a paused test dispatcher) would deadlock `readValueBlocking` against its own store. If you actually want to control where the store schedules, use the primary constructor.
+
+### 7. New, not breaking: the two helpers now support the same types
+
+`BasePrefsHelper` gains `Double`, `BaseDataStoreHelper` gains `Date`. Nothing existing changes — these are additions, and both follow their helper's established conventions. See [Supported types](#supported-types) for the storage differences that remain between the two backends.
 
 ## R8 / ProGuard / Minification
 

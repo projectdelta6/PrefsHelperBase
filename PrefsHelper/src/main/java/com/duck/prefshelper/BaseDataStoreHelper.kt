@@ -30,6 +30,7 @@ import kotlin.time.Duration.Companion.seconds
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.util.Date
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -363,6 +364,68 @@ abstract class BaseDataStoreHelper(
 	 */
 	protected fun readDoubleValue(key: String, default: Double): Double =
 		readValueBlocking(doublePreferencesKey(key), default)
+
+	/**
+	 * Add [Date] to the data store
+	 *
+	 * Stored as epoch milliseconds in a [Long]. If value is null, the key will be removed — note
+	 * this differs from `BasePrefsHelper`, which writes a -1L sentinel for temporal types.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 */
+	protected suspend fun writeDate(key: String, value: Date?) =
+		writeValue(longPreferencesKey(key), value?.time)
+
+	/**
+	 * Add [Date] to the data store asynchronously
+	 *
+	 * If value is null, the key will be removed.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store
+	 * @return The [Job] for the launched write — call [Job.join] to await completion.
+	 */
+	protected fun writeDateAsync(key: String, value: Date?): Job =
+		writeValueAsync(longPreferencesKey(key), value?.time)
+
+	/**
+	 * Read a [Date] preference as a [Flow].
+	 *
+	 * @param key The key to read the value for
+	 * @return A [Flow] emitting the [Date] stored under the key, or null if the key does not exist
+	 */
+	protected fun readDate(key: String): Flow<Date?> =
+		readValue(longPreferencesKey(key)).map { it?.let { millis -> Date(millis) } }
+
+	/**
+	 * Read a [Date] preference as a [Flow] with a non-null default.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key does not exist
+	 * @return A [Flow] emitting the [Date] stored under the key, or the default value
+	 */
+	protected fun readDate(key: String, default: Date): Flow<Date> =
+		readValue(longPreferencesKey(key)).map { it?.let { millis -> Date(millis) } ?: default }
+
+	/**
+	 * Read a [Date] preference in a blocking way.
+	 *
+	 * @param key The key to read the value for
+	 * @return The [Date] or null if the key does not exist
+	 */
+	protected fun readDateValue(key: String): Date? =
+		readValueBlocking(longPreferencesKey(key))?.let { Date(it) }
+
+	/**
+	 * Read a [Date] preference in a blocking way with a default value.
+	 *
+	 * @param key The key to read the value for
+	 * @param default The default value to return if the key does not exist
+	 * @return The [Date] stored under the key, or the default value
+	 */
+	protected fun readDateValue(key: String, default: Date): Date =
+		readValueBlocking(longPreferencesKey(key))?.let { Date(it) } ?: default
 
 	/**
 	 * Add [String] data to data Store
@@ -973,6 +1036,38 @@ abstract class BaseDataStoreHelper(
 	 * [Flow] accessor for a nullable [Double] preference — alias for [readDouble].
 	 */
 	protected fun doublePrefFlow(key: String): Flow<Double?> = readDouble(key)
+
+	/**
+	 * Create a property delegate for a [Date] preference.
+	 */
+	protected fun datePref(key: String, defaultValue: Date): ReadWriteProperty<Any?, Date> =
+		object : ReadWriteProperty<Any?, Date> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Date = readDateValue(key, defaultValue)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Date) {
+				writeDateAsync(key, value)
+			}
+		}
+
+	/**
+	 * Create a property delegate for a nullable [Date] preference.
+	 */
+	protected fun datePref(key: String): ReadWriteProperty<Any?, Date?> =
+		object : ReadWriteProperty<Any?, Date?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): Date? = readDateValue(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Date?) {
+				writeDateAsync(key, value)
+			}
+		}
+
+	/**
+	 * [Flow] accessor for a [Date] preference — alias for [readDate].
+	 */
+	protected fun datePrefFlow(key: String, defaultValue: Date): Flow<Date> = readDate(key, defaultValue)
+
+	/**
+	 * [Flow] accessor for a nullable [Date] preference — alias for [readDate].
+	 */
+	protected fun datePrefFlow(key: String): Flow<Date?> = readDate(key)
 
 	/**
 	 * Create a property delegate for a [Boolean] preference.
