@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.datastore.core.DataMigration
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -83,6 +84,20 @@ abstract class BaseDataStoreHelper(
 	 * [readValueBlocking] against its own store. Use the primary constructor if you genuinely want
 	 * to control where the store schedules its work.
 	 *
+	 * One-off data migrations go through [migrations], DataStore's own mechanism. Unlike
+	 * `BasePrefsHelper.migrateIfNeeded`, there is deliberately no version-key scheme here: a
+	 * [DataMigration] already answers "have I run?" via `shouldMigrate`, and DataStore applies it
+	 * atomically before the first read rather than racing a stamp afterwards. Adding a second
+	 * mechanism on top would be strictly worse.
+	 *
+	 * ```kotlin
+	 * class AppPrefs(context: Context) : BaseDataStoreHelper(
+	 *     context,
+	 *     "app_prefs",
+	 *     migrations = listOf(SecondsToMillisMigration()),
+	 * )
+	 * ```
+	 *
 	 * @param context Any [Context]; the application context is used internally
 	 * @param preferenceName Name of the preferences data store file
 	 * @param dispatcher The [CoroutineDispatcher] `suspend` functions run on. Does **not** affect the
@@ -90,14 +105,17 @@ abstract class BaseDataStoreHelper(
 	 * @param scope The [CoroutineScope] the `*Async` writes are launched in. Note this does not own
 	 * the store's internal actor either, so a `CoroutineExceptionHandler` here sees failures from the
 	 * `*Async` writes, not from DataStore itself.
+	 * @param migrations Migrations run once, before the first read
 	 */
 	constructor(
 		context: Context,
 		preferenceName: String,
 		dispatcher: CoroutineDispatcher = Dispatchers.IO,
 		scope: CoroutineScope = CoroutineScope(dispatcher + SupervisorJob()),
+		migrations: List<DataMigration<Preferences>> = emptyList(),
 	) : this(
 		dataStore = PreferenceDataStoreFactory.create(
+			migrations = migrations,
 			scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
 			produceFile = { context.applicationContext.preferencesDataStoreFile(preferenceName) },
 		),

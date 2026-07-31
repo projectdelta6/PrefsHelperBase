@@ -23,8 +23,13 @@ import kotlin.reflect.KProperty
 /**
  * A base class for SharedPreferences helpers
  *
- * Provides common functionality for storing and retrieving preferences of various types
- * including String, Int, Long, Date, Boolean, LocalDateTime, LocalDate, LocalTime, and Enum.
+ * Provides common functionality for storing and retrieving preferences of various types:
+ * String, Int, Long, Float, Double, Boolean, ByteArray, Set<String>, Date, Instant, LocalDateTime,
+ * LocalDate, LocalTime, Enum and Set<Enum> — the same set as [BaseDataStoreHelper].
+ *
+ * Assigning null to any nullable preference removes the key, and an absent key reads back as null.
+ * Pre-2.0 versions wrote a -1L sentinel for the temporal types instead; see
+ * [migrateLegacyTemporalSentinels] if you are upgrading an install that ran one.
  *
  * Reads and writes are synchronous; only [clearPrefs] does blocking work, and it hops to
  * [dispatcher] to do it. The dispatcher carries no [kotlinx.coroutines.Job], so cancelling the
@@ -52,6 +57,125 @@ abstract class BasePrefsHelper(
 	 */
 	fun contains(key: String): Boolean {
 		return sharedPreferences.contains(key)
+	}
+
+	/**
+	 * Run one-off migrations, at most once per version.
+	 *
+	 * Modelled on a database schema version, deliberately kept small. [migrate] is invoked only when
+	 * the stored version is behind [currentVersion], and the new version is stamped immediately
+	 * afterwards, so a non-idempotent migration ("stored seconds are now millis, multiply by 1000")
+	 * is safe to write.
+	 *
+	 * Call it from your subclass's `init` block, before anything reads a preference:
+	 *
+	 * ```kotlin
+	 * class UserPrefs(context: Context) : BasePrefsHelper() {
+	 *     override val sharedPreferences =
+	 *         context.getSharedPreferences("user", Context.MODE_PRIVATE)
+	 *
+	 *     init {
+	 *         migrateIfNeeded(currentVersion = 2) { from ->
+	 *             if (from < 2) migrateLegacyTemporalSentinels(KEY_DOB, KEY_LAST_SEEN)
+	 *         }
+	 *     }
+	 * }
+	 * ```
+	 *
+	 * **Bootstrapping.** Installs that predate versioning have no stored version, and so does a
+	 * brand-new install — they are told apart by whether the file holds anything at all. An empty
+	 * file is a fresh install: nothing runs and the current version is stamped. A non-empty file is
+	 * treated as version [VERSION_LEGACY].
+	 *
+	 * **Downgrades are left alone.** If the stored version is *ahead* of [currentVersion] — an app
+	 * downgrade — nothing runs and the stored version is not rewound, so a later upgrade still sees
+	 * the true high-water mark.
+	 *
+	 * Two caveats worth knowing. The version is stamped with `commit`, so this does a small
+	 * synchronous write on the calling thread the first time it runs; that is the price of not
+	 * re-running a migration after a crash. And the window between [migrate] returning and the stamp
+	 * landing is not atomic — a crash in between re-runs the migration, so prefer migrations that
+	 * tolerate that where you reasonably can.
+	 *
+	 * @param currentVersion The version this code expects; must be at least [VERSION_LEGACY]
+	 * @param migrate Invoked with the stored version when it is behind [currentVersion]
+	 * @return true if [migrate] was invoked
+	 */
+	fun migrateIfNeeded(currentVersion: Int, migrate: (fromVersion: Int) -> Unit): Boolean {
+		require(currentVersion >= VERSION_LEGACY) {
+			"currentVersion must be >= $VERSION_LEGACY, was $currentVersion"
+		}
+		val stored: Int? =
+			if (sharedPreferences.contains(KEY_HELPER_VERSION)) {
+				sharedPreferences.getInt(KEY_HELPER_VERSION, VERSION_LEGACY)
+			} else {
+				null
+			}
+		// No stamp: an empty file is a fresh install, anything else predates versioning.
+		val from = stored ?: if (sharedPreferences.all.isEmpty()) currentVersion else VERSION_LEGACY
+
+		if (from < currentVersion) {
+			migrate(from)
+			sharedPreferences.edit(commit = true) { putInt(KEY_HELPER_VERSION, currentVersion) }
+			return true
+		}
+		if (stored == null) {
+			// Fresh install, or one already at currentVersion but never stamped — record the
+			// baseline so the next upgrade has something to compare against.
+			sharedPreferences.edit(commit = true) { putInt(KEY_HELPER_VERSION, from) }
+		}
+		return false
+	}
+
+	/**
+	 * Clear pre-2.0 `-1L` sentinels left behind by the temporal setters.
+	 *
+	 * Before 2.0, assigning null to a [Date], [Instant], [LocalDateTime], [LocalDate] or [LocalTime]
+	 * preference wrote `-1L` rather than removing the key. 2.0 removes the key instead, which means
+	 * a value written by an older version now reads back as a real timestamp — `-1` epoch days is
+	 * `1969-12-31`, not null.
+	 *
+	 * Call this once, before the first read, with the temporal keys this helper owns. Any listed key
+	 * currently holding `-1L` is removed, so it reads as null exactly as it did before the upgrade.
+	 * Keys that are absent, hold a different value, or hold a non-`Long` are left untouched, so
+	 * calling it repeatedly is harmless.
+	 *
+	 * ```kotlin
+	 * class UserPrefs(context: Context) : BasePrefsHelper() {
+	 *     override val sharedPreferences = context.getSharedPreferences("user", Context.MODE_PRIVATE)
+	 *
+	 *     init {
+	 *         migrateLegacyTemporalSentinels(KEY_DOB, KEY_LAST_SEEN)
+	 *     }
+	 * }
+	 * ```
+	 *
+	 * Only needed for installs that ran a pre-2.0 version. New installs can skip it, and it is safe
+	 * to leave in place indefinitely.
+	 *
+	 * Note the flip side: a genuine `-1L` written by 2.0 — `Date(-1)`, or `LocalDate` of
+	 * `1969-12-31` — would also be removed. Don't pass keys whose real value could legitimately be
+	 * `-1L`, and drop the call once your install base has turned over.
+	 *
+	 * @param keys The temporal preference keys to sweep
+	 * @return The keys that were actually removed
+	 */
+	fun migrateLegacyTemporalSentinels(vararg keys: String): List<String> {
+		val stale = keys.filter { key ->
+			try {
+				sharedPreferences.contains(key) && sharedPreferences.getLong(key, 0L) == -1L
+			} catch (e: ClassCastException) {
+				// Key holds something other than a Long — not ours to migrate.
+				Log.w("BasePrefsHelper", "Skipping non-Long key \"$key\" during sentinel migration", e)
+				false
+			}
+		}
+		if (stale.isNotEmpty()) {
+			sharedPreferences.edit {
+				stale.forEach { remove(it) }
+			}
+		}
+		return stale
 	}
 
 	/**
@@ -206,7 +330,7 @@ abstract class BasePrefsHelper(
 	 */
 	fun setDate(key: String, value: Date?) {
 		sharedPreferences.edit {
-			putLong(key, value?.time ?: -1L)
+			if (value == null) remove(key) else putLong(key, value.time)
 		}
 	}
 
@@ -214,17 +338,17 @@ abstract class BasePrefsHelper(
 	 * Get a [Date] preference
 	 *
 	 * @param key The key to get the value for
-	 * @return The date stored under the key, or null if the key does not exist or the value is null
+	 * @return The date stored under the key, or null if the key does not exist
 	 */
 	fun getDate(key: String): Date? {
-		val time = sharedPreferences.getLong(key, -1L)
-		return if(time == -1L) null else Date(time)
+		if (!sharedPreferences.contains(key)) return null
+		return Date(sharedPreferences.getLong(key, 0L))
 	}
 
 	/**
 	 * Set an [Instant] preference
 	 *
-	 * Stored as epoch milliseconds, using the same -1L sentinel as the other temporal types here.
+	 * Stored as epoch milliseconds. Assigning null removes the key.
 	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
@@ -232,7 +356,7 @@ abstract class BasePrefsHelper(
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setInstant(key: String, value: Instant?) {
 		sharedPreferences.edit {
-			putLong(key, value?.toEpochMilli() ?: -1L)
+			if (value == null) remove(key) else putLong(key, value.toEpochMilli())
 		}
 	}
 
@@ -240,12 +364,12 @@ abstract class BasePrefsHelper(
 	 * Get an [Instant] preference
 	 *
 	 * @param key The key to get the value for
-	 * @return The Instant stored under the key, or null if the key does not exist or the value is null
+	 * @return The Instant stored under the key, or null if the key does not exist
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun getInstant(key: String): Instant? {
-		val millis = sharedPreferences.getLong(key, -1L)
-		return if (millis == -1L) null else Instant.ofEpochMilli(millis)
+		if (!sharedPreferences.contains(key)) return null
+		return Instant.ofEpochMilli(sharedPreferences.getLong(key, 0L))
 	}
 
 	/**
@@ -311,7 +435,7 @@ abstract class BasePrefsHelper(
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalDateTime(key: String, value: LocalDateTime?) {
 		sharedPreferences.edit {
-			putLong(key, value?.toEpochSecond(ZoneOffset.UTC) ?: -1L)
+			if (value == null) remove(key) else putLong(key, value.toEpochSecond(ZoneOffset.UTC))
 		}
 	}
 
@@ -319,12 +443,12 @@ abstract class BasePrefsHelper(
 	 * Get a [LocalDateTime] preference
 	 *
 	 * @param key The key to get the value for
-	 * @return The LocalDateTime stored under the key, or null if the key does not exist or the value is null
+	 * @return The LocalDateTime stored under the key, or null if the key does not exist
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun getLocalDateTime(key: String): LocalDateTime? {
-		val time = sharedPreferences.getLong(key, -1L)
-		return if(time == -1L) null else LocalDateTime.ofEpochSecond(time, 0, ZoneOffset.UTC)
+		if (!sharedPreferences.contains(key)) return null
+		return LocalDateTime.ofEpochSecond(sharedPreferences.getLong(key, 0L), 0, ZoneOffset.UTC)
 	}
 
 	/**
@@ -336,7 +460,7 @@ abstract class BasePrefsHelper(
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalDate(key: String, value: LocalDate?) {
 		sharedPreferences.edit {
-			putLong(key, value?.toEpochDay() ?: -1L)
+			if (value == null) remove(key) else putLong(key, value.toEpochDay())
 		}
 	}
 
@@ -344,12 +468,12 @@ abstract class BasePrefsHelper(
 	 * Get a [LocalDate] preference
 	 *
 	 * @param key The key to get the value for
-	 * @return The LocalDate stored under the key, or null if the key does not exist or the value is null
+	 * @return The LocalDate stored under the key, or null if the key does not exist
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun getLocalDate(key: String): LocalDate? {
-		val time = sharedPreferences.getLong(key, -1L)
-		return if(time == -1L) null else LocalDate.ofEpochDay(time)
+		if (!sharedPreferences.contains(key)) return null
+		return LocalDate.ofEpochDay(sharedPreferences.getLong(key, 0L))
 	}
 
 	/**
@@ -361,7 +485,7 @@ abstract class BasePrefsHelper(
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun setLocalTime(key: String, value: LocalTime?) {
 		sharedPreferences.edit {
-			putLong(key, value?.toSecondOfDay()?.toLong() ?: -1L)
+			if (value == null) remove(key) else putLong(key, value.toSecondOfDay().toLong())
 		}
 	}
 
@@ -369,12 +493,16 @@ abstract class BasePrefsHelper(
 	 * Get a [LocalTime] preference
 	 *
 	 * @param key The key to get the value for
-	 * @return The LocalTime stored under the key, or null if the key does not exist or the value is null
+	 * @return The LocalTime stored under the key, or null if the key does not exist or the stored
+	 * value is outside [LocalTime]'s valid 0..86399 second range (which includes the pre-2.0 -1L
+	 * sentinel, so stale data reads as null rather than throwing)
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	fun getLocalTime(key: String): LocalTime? {
-		val time = sharedPreferences.getLong(key, -1L)
-		return if(time == -1L) null else LocalTime.ofSecondOfDay(time)
+		if (!sharedPreferences.contains(key)) return null
+		val seconds = sharedPreferences.getLong(key, 0L)
+		if (seconds !in 0L..86_399L) return null
+		return LocalTime.ofSecondOfDay(seconds)
 	}
 
 	/**
@@ -636,7 +764,7 @@ abstract class BasePrefsHelper(
 	/**
 	 * Create a property delegate for a nullable [Instant] preference.
 	 *
-	 * Assigning null stores the -1L sentinel (matching [setInstant]/[getInstant]).
+	 * Returns null when the key is absent. Assigning null removes the key (matching [setInstant]/[getInstant]).
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	protected fun instantPref(key: String): ReadWriteProperty<Any?, Instant?> =
@@ -648,7 +776,7 @@ abstract class BasePrefsHelper(
 	/**
 	 * Create a property delegate for a nullable [Date] preference.
 	 *
-	 * Assigning null stores the -1L sentinel (matching [setDate]/[getDate]).
+	 * Returns null when the key is absent. Assigning null removes the key (matching [setDate]/[getDate]).
 	 */
 	protected fun datePref(key: String): ReadWriteProperty<Any?, Date?> =
 		object : ReadWriteProperty<Any?, Date?> {
@@ -659,7 +787,7 @@ abstract class BasePrefsHelper(
 	/**
 	 * Create a property delegate for a nullable [LocalDateTime] preference.
 	 *
-	 * Assigning null stores the -1L sentinel (matching [setLocalDateTime]/[getLocalDateTime]).
+	 * Returns null when the key is absent. Assigning null removes the key (matching [setLocalDateTime]/[getLocalDateTime]).
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	protected fun localDateTimePref(key: String): ReadWriteProperty<Any?, LocalDateTime?> =
@@ -671,7 +799,7 @@ abstract class BasePrefsHelper(
 	/**
 	 * Create a property delegate for a nullable [LocalDate] preference.
 	 *
-	 * Assigning null stores the -1L sentinel (matching [setLocalDate]/[getLocalDate]).
+	 * Returns null when the key is absent. Assigning null removes the key (matching [setLocalDate]/[getLocalDate]).
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	protected fun localDatePref(key: String): ReadWriteProperty<Any?, LocalDate?> =
@@ -683,7 +811,7 @@ abstract class BasePrefsHelper(
 	/**
 	 * Create a property delegate for a nullable [LocalTime] preference.
 	 *
-	 * Assigning null stores the -1L sentinel (matching [setLocalTime]/[getLocalTime]).
+	 * Returns null when the key is absent. Assigning null removes the key (matching [setLocalTime]/[getLocalTime]).
 	 */
 	@RequiresApi(Build.VERSION_CODES.O)
 	protected fun localTimePref(key: String): ReadWriteProperty<Any?, LocalTime?> =
@@ -748,5 +876,22 @@ abstract class BasePrefsHelper(
 			}
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: Set<T>) = setEnumSet(key, value)
 		}
+	}
+
+	companion object {
+		/**
+		 * Key [migrateIfNeeded] stamps the schema version under.
+		 *
+		 * It lives in the same file as your own preferences and will show up in
+		 * [SharedPreferences.getAll], so skip it if you enumerate keys. Double-underscored to stay
+		 * clear of ordinary key names.
+		 */
+		const val KEY_HELPER_VERSION: String = "__prefs_helper_version"
+
+		/**
+		 * The version assumed for a non-empty file that has never been stamped — i.e. any install
+		 * created before [migrateIfNeeded] existed.
+		 */
+		const val VERSION_LEGACY: Int = 1
 	}
 }

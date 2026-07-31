@@ -189,14 +189,168 @@ class BasePrefsHelperRealPrefsTest {
 	}
 
 	/**
-	 * `BasePrefsHelper` uses -1L as its "absent" sentinel for temporal types, so an Instant at
-	 * exactly -1ms is indistinguishable from null. Documented in the README; pinned here so the
-	 * limitation is a decision rather than a surprise.
+	 * Before 2.0 the temporal setters wrote `-1L` to mean null, which made these values unstorable.
+	 * They round-trip now; this is the regression guard for that fix.
+	 *
+	 * `LocalDate` is the one that mattered in practice: epoch day -1 is 1969-12-31, an ordinary
+	 * date that silently read back as null.
 	 */
 	@Test
-	fun testInstantAtSentinelMillisReadsBackAsNull() {
+	fun testFormerSentinelValuesNowRoundTrip() {
 		helper.setInstant("i", Instant.ofEpochMilli(-1L))
-		assertNull(helper.getInstant("i"))
+		assertEquals(Instant.ofEpochMilli(-1L), helper.getInstant("i"))
+
+		helper.setDate("d", java.util.Date(-1L))
+		assertEquals(java.util.Date(-1L), helper.getDate("d"))
+
+		val lastDayOf1969 = java.time.LocalDate.of(1969, 12, 31)
+		assertEquals(-1L, lastDayOf1969.toEpochDay())
+		helper.setLocalDate("ld", lastDayOf1969)
+		assertEquals(lastDayOf1969, helper.getLocalDate("ld"))
+
+		val secondBeforeEpoch = java.time.LocalDateTime.of(1969, 12, 31, 23, 59, 59)
+		helper.setLocalDateTime("ldt", secondBeforeEpoch)
+		assertEquals(secondBeforeEpoch, helper.getLocalDateTime("ldt"))
+	}
+
+	/** Assigning null removes the key outright now, matching `BaseDataStoreHelper`. */
+	@Test
+	fun testNullTemporalRemovesKey() {
+		helper.setDate("d", java.util.Date(1_000L))
+		assertTrue(helper.contains("d"))
+
+		helper.setDate("d", null)
+		assertTrue(!helper.contains("d"))
+		assertNull(helper.getDate("d"))
+	}
+
+	/**
+	 * `LocalTime.ofSecondOfDay` throws outside 0..86399, so a stale pre-2.0 `-1L` would crash rather
+	 * than misread. Out-of-range values read as null instead.
+	 */
+	@Test
+	fun testOutOfRangeLocalTimeReadsAsNullRatherThanThrowing() {
+		helper.setLong("lt", -1L)
+		assertNull(helper.getLocalTime("lt"))
+
+		helper.setLong("lt", 999_999L)
+		assertNull(helper.getLocalTime("lt"))
+	}
+
+	// endregion
+
+	// region Legacy sentinel migration
+
+	@Test
+	fun testMigrateLegacyTemporalSentinelsRemovesOnlySentinelKeys() {
+		helper.setLong("stale", -1L)
+		helper.setLong("real", 1_700_000_000_000L)
+
+		val removed = helper.migrateLegacyTemporalSentinels("stale", "real", "never_written")
+
+		assertEquals(listOf("stale"), removed)
+		assertTrue(!helper.contains("stale"))
+		assertEquals(1_700_000_000_000L, helper.getLong("real"))
+	}
+
+	/** Safe to leave in place: a second run finds nothing and changes nothing. */
+	@Test
+	fun testMigrateLegacyTemporalSentinelsIsIdempotent() {
+		helper.setLong("stale", -1L)
+		assertEquals(listOf("stale"), helper.migrateLegacyTemporalSentinels("stale"))
+		assertEquals(emptyList<String>(), helper.migrateLegacyTemporalSentinels("stale"))
+	}
+
+	/** A key holding something other than a Long must be skipped, not crash the migration. */
+	@Test
+	fun testMigrateLegacyTemporalSentinelsSkipsNonLongKeys() {
+		helper.setString("text", "not a long")
+		assertEquals(emptyList<String>(), helper.migrateLegacyTemporalSentinels("text"))
+		assertEquals("not a long", helper.getString("text"))
+	}
+
+	/** End to end: the upgrade path a 1.x install actually takes. */
+	@Test
+	fun testLegacyNullDateStillReadsAsNullAfterMigration() {
+		// What a pre-2.0 install left on disk for "no date".
+		helper.setLong("dob", -1L)
+		// Without the sweep this would surface as 1969-12-31.
+		assertEquals(java.util.Date(-1L), helper.getDate("dob"))
+
+		helper.migrateLegacyTemporalSentinels("dob")
+		assertNull(helper.getDate("dob"))
+	}
+
+	// endregion
+
+	// region Version-stamped migrations
+
+	@Test
+	fun testMigrateIfNeededSkipsFreshInstall() {
+		var ran = false
+		val invoked = helper.migrateIfNeeded(currentVersion = 2) { ran = true }
+
+		assertTrue(!invoked)
+		assertTrue(!ran)
+		// Baseline stamped so the next upgrade has something to compare against.
+		assertEquals(2, prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1))
+	}
+
+	@Test
+	fun testMigrateIfNeededTreatsUnstampedNonEmptyPrefsAsLegacy() {
+		helper.setString("pre_existing", "written by 1.x")
+
+		var seenFrom = -99
+		val invoked = helper.migrateIfNeeded(currentVersion = 2) { from -> seenFrom = from }
+
+		assertTrue(invoked)
+		assertEquals(BasePrefsHelper.VERSION_LEGACY, seenFrom)
+		assertEquals(2, prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1))
+	}
+
+	/** The whole point: a non-idempotent migration must not run twice. */
+	@Test
+	fun testMigrateIfNeededRunsOnlyOnce() {
+		helper.setString("pre_existing", "written by 1.x")
+
+		var runs = 0
+		helper.migrateIfNeeded(currentVersion = 2) { runs++ }
+		helper.migrateIfNeeded(currentVersion = 2) { runs++ }
+		helper.migrateIfNeeded(currentVersion = 2) { runs++ }
+
+		assertEquals(1, runs)
+	}
+
+	@Test
+	fun testMigrateIfNeededRunsAgainForAHigherVersion() {
+		helper.setString("pre_existing", "written by 1.x")
+
+		val seen = mutableListOf<Int>()
+		helper.migrateIfNeeded(currentVersion = 2) { seen += it }
+		helper.migrateIfNeeded(currentVersion = 3) { seen += it }
+
+		assertEquals(listOf(BasePrefsHelper.VERSION_LEGACY, 2), seen)
+		assertEquals(3, prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1))
+	}
+
+    /** An app downgrade must not rewind the stamp, or the migration would re-run on re-upgrade. */
+	@Test
+	fun testMigrateIfNeededDoesNotRewindOnDowngrade() {
+		helper.setString("pre_existing", "written by 1.x")
+		helper.migrateIfNeeded(currentVersion = 5) { }
+		assertEquals(5, prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1))
+
+		var ran = false
+		val invoked = helper.migrateIfNeeded(currentVersion = 3) { ran = true }
+
+		assertTrue(!invoked)
+		assertTrue(!ran)
+		assertEquals(5, prefs.getInt(BasePrefsHelper.KEY_HELPER_VERSION, -1))
+	}
+
+	@Test(expected = IllegalArgumentException::class)
+	fun testMigrateIfNeededRejectsVersionBelowLegacy() {
+		helper.migrateIfNeeded(currentVersion = 0) { }
 	}
 
 	@Test

@@ -63,8 +63,14 @@ Storage conventions still differ by backend, and deliberately so:
 - **`Double` on `BasePrefsHelper`** is stored as raw IEEE-754 bits via `putLong`/`Double.fromBits`, because `SharedPreferences` has no double primitive. Reading that key with `getLong` returns the bit pattern, not the number.
 - **`ByteArray` on `BasePrefsHelper`** is Base64 (`NO_WRAP`) in a String, since SharedPreferences has no binary type. Undecodable data logs and returns null rather than throwing.
 - **`Set<String>` on `BasePrefsHelper`** copies on both read and write. `SharedPreferences.getStringSet` documents its result as one callers must not modify, and the platform keeps a reference to the set it is handed — both directions are trapped, so both are copied.
-- **`Date`/`Instant` on `BaseDataStoreHelper`** are epoch millis in a `longPreferencesKey` and null removes the key — unlike `BasePrefsHelper`, whose temporal types use the `-1L` sentinel and therefore cannot represent `-1L` millis distinctly from null.
+- **Null semantics are identical on both helpers** as of 2.0: assigning null removes the key, an absent key reads as null. The `-1L` temporal sentinel `BasePrefsHelper` used before 2.0 is gone — it made `LocalDate` 1969-12-31 (epoch day -1) unstorable. `migrateLegacyTemporalSentinels(vararg keys)` sweeps stale sentinels left by 1.x; `getLocalTime` also treats out-of-range values as null, since `LocalTime.ofSecondOfDay(-1)` throws.
 - **`Set<Enum>`** is stored as a set of `Enum.name` on both. Unknown names are dropped on read so deleting an enum constant doesn't break existing installs.
+
+## Migrations
+
+`BasePrefsHelper.migrateIfNeeded(currentVersion) { from -> }` runs a block at most once per version, stamped under `KEY_HELPER_VERSION` in the consumer's own prefs file. An unstamped file is treated as `VERSION_LEGACY` (1) if it holds anything, or as a fresh install if empty — that's how pre-versioning installs are told from new ones. Downgrades don't rewind the stamp. The stamp is written with `commit`, so the first call does a small synchronous write.
+
+`BaseDataStoreHelper` has **no** equivalent, deliberately: DataStore's own `DataMigration` already tracks whether it has run and is applied atomically before the first read, which is strictly better than stamping a version afterwards. The convenience constructor takes a `migrations` list that is passed straight to `PreferenceDataStoreFactory`. Don't add a parallel version-key scheme here.
 
 ## Gotchas
 

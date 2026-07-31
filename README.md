@@ -172,20 +172,48 @@ class PrefsHelper(context: Context) {
 
 Each type exposes a non-nullable delegate `*Pref(key, defaultValue)` and a nullable delegate `*Pref(key)`. `BaseDataStoreHelper` additionally exposes matching `*PrefFlow` accessors for reactive reads. The `java.time` types require API 26 (`@RequiresApi(O)`), as they did before.
 
-The types match, but the two backends store and clear some of them differently — inherent to `SharedPreferences` versus `DataStore`, not an oversight:
+**Null means the same thing on both helpers as of 2.0:** assigning `null` removes the key, and an absent key reads back as `null`. There is no sentinel value any more — see [migration item 8](#8-the--1l-temporal-sentinel-is-gone) if you are upgrading.
+
+What still differs is only the underlying encoding, which is inherent to `SharedPreferences` versus `DataStore`:
 
 | | `BasePrefsHelper` | `BaseDataStoreHelper` |
 |---|---|---|
-| Assigning `null` | Removes the key for the non-temporal types; writes a `-1L` sentinel for `Date`/`Instant`/`LocalDateTime`/`LocalDate`/`LocalTime` | Always removes the key |
 | `Double` | Raw IEEE-754 bits in a `Long` — `SharedPreferences` has no double primitive, so never read that key back with `getLong` | Native `doublePreferencesKey` |
 | `ByteArray` | Base64 (`NO_WRAP`) in a `String`; undecodable data reads back as null | Native `byteArrayPreferencesKey` |
-| `Date` / `Instant` | Epoch millis, with `-1L` doubling as "absent" | Epoch millis in a `Long`; absent means absent |
+| `Date` / `Instant` | Epoch millis in a `Long` | Epoch millis in a `Long` |
 | `Set<String>` | Defensive copy on both read and write, so neither side can be corrupted by later mutation | Immutable set from DataStore |
+| Migrations | [`migrateIfNeeded`](#versioned-migrations) — a stored version stamp | DataStore's own `DataMigration` list, passed to the constructor |
 
-Two consequences worth knowing:
+**`Set<Enum>` tolerates deleted constants** on both helpers: stored names that no longer match a constant are dropped on read rather than throwing, so removing an enum value doesn't break existing installs.
 
-- **Pre-epoch timestamps.** `BasePrefsHelper` cannot distinguish `Date(-1L)` / `Instant.ofEpochMilli(-1)` from null; `BaseDataStoreHelper` can. If you store timestamps that could legitimately be 1ms before the epoch, use the DataStore helper.
-- **`Set<Enum>` tolerates deleted constants.** Stored names that no longer match a constant are dropped on read rather than throwing, on both helpers — so removing an enum value doesn't break existing installs.
+### Versioned migrations
+
+`BasePrefsHelper.migrateIfNeeded` runs a block at most once per version, so a migration that *isn't* safe to repeat — "the stored value was seconds, it's millis now" — can be written without hand-rolling a guard:
+
+```kotlin
+class UserPrefs(context: Context) : BasePrefsHelper() {
+    override val sharedPreferences =
+        context.getSharedPreferences("user", Context.MODE_PRIVATE)
+
+    init {
+        migrateIfNeeded(currentVersion = 2) { from ->
+            if (from < 2) migrateLegacyTemporalSentinels(KEY_DOB, KEY_LAST_SEEN)
+        }
+    }
+}
+```
+
+An install with no stamp is treated as version 1 if the file already holds preferences, or as a fresh install if it's empty — so upgrades and first runs are told apart without you doing anything. Downgrades never rewind the stamp. The version lives under `BasePrefsHelper.KEY_HELPER_VERSION` in your own prefs file, so skip that key if you enumerate `getAll()`.
+
+`BaseDataStoreHelper` deliberately has **no** equivalent. DataStore already ships `DataMigration`, which answers "have I run?" itself and is applied atomically before the first read rather than racing a stamp written afterwards. Pass migrations to the constructor and use the platform mechanism:
+
+```kotlin
+class AppPrefs(context: Context) : BaseDataStoreHelper(
+    context,
+    "app_prefs",
+    migrations = listOf(SecondsToMillisMigration()),
+)
+```
 
 ## Migrating to 2.0
 
@@ -193,7 +221,11 @@ Two consequences worth knowing:
 
 **Most subclasses need no change at all.** If you extend `BasePrefsHelper()` or `BaseDataStoreHelper(context, "name")` without passing a coroutine context of your own, you are already on the new defaults.
 
-**Two items on this list change behaviour without the compiler telling you: items 2 and 5.** The rest are removed or retyped symbols, so they fail the build and you'll find them immediately. Item 2 is the one that can corrupt state — read it properly. Item 5 only bites a specific threading arrangement.
+**Three items change behaviour without the compiler telling you: items 2, 5 and 8.** The rest are removed or retyped symbols, so they fail the build and you'll find them immediately.
+
+- **Item 8** is the only one that changes how *existing stored data* is read. If you use temporal preferences on `BasePrefsHelper`, start there.
+- **Item 2** can leave state half-written when a caller is cancelled.
+- **Item 5** only bites one specific threading arrangement.
 
 ### 1. `coroutineContext` → `dispatcher` (+ optional `scope`)
 
@@ -267,6 +299,30 @@ The convenience constructor deliberately keeps the store's own internal actor on
 2.0 closes the gap where each helper supported types the other didn't, and adds several new ones. `BasePrefsHelper` gains `Double`, `Float`, `ByteArray`, `Set<String>`, `Instant` and `Set<Enum>`; `BaseDataStoreHelper` gains `Date`, `Float`, `ByteArray`, `Set<String>`, `Instant` and `Set<Enum>`.
 
 Nothing existing changes — these are additions, and each follows its helper's established conventions. See [Supported types](#supported-types) for the storage differences that remain between the two backends.
+
+### 8. The `-1L` temporal sentinel is gone
+
+**This one touches stored data. Read it if you use `Date`, `Instant`, `LocalDateTime`, `LocalDate` or `LocalTime` on `BasePrefsHelper`.**
+
+Before 2.0, assigning `null` to one of those wrote `-1L` rather than removing the key, and any stored `-1L` read back as `null`. 2.0 removes the key instead, matching `BaseDataStoreHelper`.
+
+That fixes a real defect: epoch day `-1` is **1969-12-31**, so a `LocalDate` of that day was silently unstorable and read back as `null`. Same for `Date`/`Instant` at 1ms before the epoch.
+
+But it also means **data written by 1.x now reads differently**. A key left at `-1L` by an older version is no longer "no value" — it is 1969-12-31. Sweep it once, at startup, before anything reads:
+
+```kotlin
+init {
+    migrateIfNeeded(currentVersion = 2) { from ->
+        if (from < 2) migrateLegacyTemporalSentinels(KEY_DOB, KEY_LAST_SEEN)
+    }
+}
+```
+
+`migrateLegacyTemporalSentinels` removes each listed key that currently holds `-1L`, so it reads as `null` exactly as before. It ignores absent keys, other values and non-`Long` keys, so it's safe to run repeatedly — the `migrateIfNeeded` wrapper is belt-and-braces, and worth adopting for the migrations that follow. Drop the call once your install base has turned over.
+
+Don't pass keys whose genuine value could be `-1L`, or you'll delete real data.
+
+`LocalTime` needs no migration: its valid range is 0..86399, so `-1` was never a legal value. Out-of-range stored values now read as `null` instead of throwing.
 
 ## R8 / ProGuard / Minification
 

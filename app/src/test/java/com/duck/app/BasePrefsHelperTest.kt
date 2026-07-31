@@ -199,20 +199,21 @@ class BasePrefsHelperTest {
 	}
 
 	@Test
-	fun testSetInstantNullStoresSentinel() {
+	fun testSetInstantNullRemovesKey() {
 		prefsHelper.setInstant("key", null)
-		verify(mockEditor).putLong("key", -1L)
+		verify(mockEditor).remove("key")
 	}
 
 	@Test
 	fun testGetInstant() {
-		`when`(mockSharedPreferences.getLong("key", -1L)).thenReturn(1_700_000_000_000L)
+		`when`(mockSharedPreferences.contains("key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("key", 0L)).thenReturn(1_700_000_000_000L)
 		assertEquals(java.time.Instant.ofEpochMilli(1_700_000_000_000L), prefsHelper.getInstant("key"))
 	}
 
 	@Test
-	fun testGetInstantReturnsNullForSentinel() {
-		`when`(mockSharedPreferences.getLong("key", -1L)).thenReturn(-1L)
+	fun testGetInstantReturnsNullWhenAbsent() {
+		`when`(mockSharedPreferences.contains("key")).thenReturn(false)
 		assertNull(prefsHelper.getInstant("key"))
 	}
 
@@ -296,13 +297,14 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullDate() {
 		prefsHelper.setDate("date_key", null)
-		verify(mockEditor).putLong("date_key", -1L)
+		verify(mockEditor).remove("date_key")
 		verify(mockEditor).apply()
 	}
 
 	@Test
 	fun testGetDate() {
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(1234567890000L)
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_key", 0L)).thenReturn(1234567890000L)
 		val date = prefsHelper.getDate("date_key")
 		assertNotNull(date)
 		assertEquals(1234567890000L, date?.time)
@@ -310,7 +312,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetDateReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(false)
 		assertNull(prefsHelper.getDate("date_key"))
 	}
 
@@ -325,7 +327,7 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullLocalDateTime() {
 		prefsHelper.setLocalDateTime("datetime_key", null)
-		verify(mockEditor).putLong("datetime_key", -1L)
+		verify(mockEditor).remove("datetime_key")
 		verify(mockEditor).apply()
 	}
 
@@ -333,7 +335,8 @@ class BasePrefsHelperTest {
 	fun testGetLocalDateTime() {
 		val dateTime = LocalDateTime.of(2023, 11, 25, 10, 30, 45)
 		val epochSecond = dateTime.toEpochSecond(ZoneOffset.UTC)
-		`when`(mockSharedPreferences.getLong("datetime_key", -1L)).thenReturn(epochSecond)
+		`when`(mockSharedPreferences.contains("datetime_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("datetime_key", 0L)).thenReturn(epochSecond)
 		val result = prefsHelper.getLocalDateTime("datetime_key")
 		assertNotNull(result)
 		assertEquals(dateTime, result)
@@ -341,7 +344,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetLocalDateTimeReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("datetime_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("datetime_key")).thenReturn(false)
 		assertNull(prefsHelper.getLocalDateTime("datetime_key"))
 	}
 
@@ -356,14 +359,15 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullLocalDate() {
 		prefsHelper.setLocalDate("date_key", null)
-		verify(mockEditor).putLong("date_key", -1L)
+		verify(mockEditor).remove("date_key")
 		verify(mockEditor).apply()
 	}
 
 	@Test
 	fun testGetLocalDate() {
 		val date = LocalDate.of(2023, 11, 25)
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(date.toEpochDay())
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_key", 0L)).thenReturn(date.toEpochDay())
 		val result = prefsHelper.getLocalDate("date_key")
 		assertNotNull(result)
 		assertEquals(date, result)
@@ -371,8 +375,19 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetLocalDateReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("date_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(false)
 		assertNull(prefsHelper.getLocalDate("date_key"))
+	}
+
+	/**
+	 * Epoch day -1 is 1969-12-31, which the pre-2.0 sentinel made unstorable. It is an ordinary
+	 * value now, so it must NOT be mistaken for "not set".
+	 */
+	@Test
+	fun testGetLocalDateReadsEpochDayMinusOneAsARealDate() {
+		`when`(mockSharedPreferences.contains("date_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_key", 0L)).thenReturn(-1L)
+		assertEquals(LocalDate.of(1969, 12, 31), prefsHelper.getLocalDate("date_key"))
 	}
 
 	@Test
@@ -386,14 +401,15 @@ class BasePrefsHelperTest {
 	@Test
 	fun testSetNullLocalTime() {
 		prefsHelper.setLocalTime("time_key", null)
-		verify(mockEditor).putLong("time_key", -1L)
+		verify(mockEditor).remove("time_key")
 		verify(mockEditor).apply()
 	}
 
 	@Test
 	fun testGetLocalTime() {
 		val time = LocalTime.of(14, 30, 45)
-		`when`(mockSharedPreferences.getLong("time_key", -1L)).thenReturn(time.toSecondOfDay().toLong())
+		`when`(mockSharedPreferences.contains("time_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("time_key", 0L)).thenReturn(time.toSecondOfDay().toLong())
 		val result = prefsHelper.getLocalTime("time_key")
 		assertNotNull(result)
 		assertEquals(time, result)
@@ -401,7 +417,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testGetLocalTimeReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("time_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("time_key")).thenReturn(false)
 		assertNull(prefsHelper.getLocalTime("time_key"))
 	}
 
@@ -718,7 +734,8 @@ class BasePrefsHelperTest {
 	// Instant delegate
 	@Test
 	fun testInstantPrefDelegateGet() {
-		`when`(mockSharedPreferences.getLong("instant_key", -1L)).thenReturn(1_234_567L)
+		`when`(mockSharedPreferences.contains("instant_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("instant_key", 0L)).thenReturn(1_234_567L)
 		assertEquals(java.time.Instant.ofEpochMilli(1_234_567L), prefsHelper.instantValue)
 	}
 
@@ -787,7 +804,8 @@ class BasePrefsHelperTest {
 	// Date delegate
 	@Test
 	fun testDatePrefDelegateGet() {
-		`when`(mockSharedPreferences.getLong("date_delegate_key", -1L)).thenReturn(1234567890000L)
+		`when`(mockSharedPreferences.contains("date_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("date_delegate_key", 0L)).thenReturn(1234567890000L)
 		assertEquals(Date(1234567890000L), prefsHelper.dateValue)
 	}
 
@@ -800,7 +818,7 @@ class BasePrefsHelperTest {
 
 	@Test
 	fun testDatePrefDelegateReturnsNullWhenNotSet() {
-		`when`(mockSharedPreferences.getLong("date_delegate_key", -1L)).thenReturn(-1L)
+		`when`(mockSharedPreferences.contains("date_delegate_key")).thenReturn(false)
 		assertNull(prefsHelper.dateValue)
 	}
 
@@ -808,7 +826,8 @@ class BasePrefsHelperTest {
 	@Test
 	fun testLocalDateTimePrefDelegateGet() {
 		val dateTime = LocalDateTime.of(2023, 11, 25, 10, 30, 45)
-		`when`(mockSharedPreferences.getLong("ldt_delegate_key", -1L))
+		`when`(mockSharedPreferences.contains("ldt_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("ldt_delegate_key", 0L))
 			.thenReturn(dateTime.toEpochSecond(ZoneOffset.UTC))
 		assertEquals(dateTime, prefsHelper.localDateTimeValue)
 	}
@@ -825,7 +844,8 @@ class BasePrefsHelperTest {
 	@Test
 	fun testLocalDatePrefDelegateGet() {
 		val date = LocalDate.of(2023, 11, 25)
-		`when`(mockSharedPreferences.getLong("ld_delegate_key", -1L)).thenReturn(date.toEpochDay())
+		`when`(mockSharedPreferences.contains("ld_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("ld_delegate_key", 0L)).thenReturn(date.toEpochDay())
 		assertEquals(date, prefsHelper.localDateValue)
 	}
 
@@ -841,7 +861,8 @@ class BasePrefsHelperTest {
 	@Test
 	fun testLocalTimePrefDelegateGet() {
 		val time = LocalTime.of(14, 30, 45)
-		`when`(mockSharedPreferences.getLong("lt_delegate_key", -1L)).thenReturn(time.toSecondOfDay().toLong())
+		`when`(mockSharedPreferences.contains("lt_delegate_key")).thenReturn(true)
+		`when`(mockSharedPreferences.getLong("lt_delegate_key", 0L)).thenReturn(time.toSecondOfDay().toLong())
 		assertEquals(time, prefsHelper.localTimeValue)
 	}
 
