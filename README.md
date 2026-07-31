@@ -205,7 +205,20 @@ Anywhere else you relied on a prefs write surviving its caller's cancellation ne
 
 `BasePrefsHelper.Companion.supervisorJob` and `BaseDataStoreHelper.Companion.supervisorJob` have been deleted. They were `companion val`s — one `Job` shared by every helper instance in the process, so cancelling it once silently and permanently stopped async writes everywhere. The default `Job` is now created per instance. Nothing is expected to reference these, but grep for `supervisorJob` before upgrading.
 
-### 4. `readValueBlocking` no longer runs on `Dispatchers.IO`
+### 4. The long-deprecated `*Bool` methods are gone
+
+`BaseDataStoreHelper`'s four `protected` boolean methods, deprecated since before 1.x and carrying a "remove in a future release" note, have been deleted. Their replacements have been available the whole time:
+
+| Removed | Replacement |
+|---------|-------------|
+| `writeBool(key, value: Boolean)` | `writeBoolean(key, value)` |
+| `writeBool(key, value: Boolean?)` | `writeBoolean(key, value)` |
+| `readNullableBool(key)` | `readBoolean(key)` |
+| `readBool(key)` | `readBoolean(key, true)` |
+
+Mind the last one: `readBool(key)` defaulted to **`true`**, not `false`, and `readBoolean(key)` on its own is the *nullable* overload returning `Flow<Boolean?>`. Pass the default explicitly — an IDE "replace with" that drops the `true` will silently change behaviour.
+
+### 5. `readValueBlocking` no longer runs on `Dispatchers.IO`
 
 DataStore is already main-safe, so the hop bought nothing and the `Job` it carried made the blocking read cancellable process-wide by accident. It now uses a plain `runBlocking`. One caveat: never call it from a thread the backing `DataStore`'s own scope is confined to — the read can't make progress and you'll block for the full 2-second timeout and get `null`.
 

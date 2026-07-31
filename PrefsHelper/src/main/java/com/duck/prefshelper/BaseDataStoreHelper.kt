@@ -90,33 +90,6 @@ abstract class BaseDataStoreHelper(
 		scope = scope,
 	)
 
-	//Todo: remove Deprecated methods in future release
-	/**
-	 * Add Boolean to the data store
-	 */
-	@Deprecated("Use writeBoolean instead", ReplaceWith("writeBoolean(key, value)"))
-	protected suspend fun writeBool(key: String, value: Boolean) =
-		writeBoolean(key, value)
-
-	/**
-	 * Add Nullable Boolean to the data store
-	 */
-	@Deprecated("Use writeBoolean instead", ReplaceWith("writeBoolean(key, value)"))
-	protected suspend fun writeBool(key: String, value: Boolean?) = writeBoolean(key, value)
-
-	/**
-	 * Reading the Boolean from the data store
-	 */
-	@Deprecated("Use readBoolean instead", ReplaceWith("readBoolean(key)"))
-	protected fun readNullableBool(key: String): Flow<Boolean?> = readBoolean(key)
-
-	/**
-	 * Reading the Boolean from the data store
-	 */
-	@Deprecated("Use readBoolean(key, default) instead", ReplaceWith("readBoolean(key, true)"))
-	protected fun readBool(key: String): Flow<Boolean> = readBoolean(key, true)
-	//end Deprecated methods
-
 	/**
 	 * Clear all preferences in the data store.
 	 *

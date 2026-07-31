@@ -27,8 +27,8 @@ LocalDateTime, LocalDate, LocalTime, and Enums.
 ./gradlew :app:koverHtmlReportDebug   # HTML -> app/build/reports/kover/htmlDebug/index.html
 ./gradlew :app:koverVerifyDebug       # fails below the coverage floor (minBound in app/build.gradle.kts)
 
-# Generate documentation
-./gradlew :PrefsHelper:dokkaHtml
+# Generate documentation (Dokka 2.x V2 task; the old `dokkaHtml` V1 task no longer exists)
+./gradlew :PrefsHelper:dokkaGenerateHtml
 
 # Clean build
 ./gradlew clean
