@@ -268,6 +268,108 @@ class AppPrefs(context: Context) : BaseDataStoreHelper(
 )
 ```
 
+### Encrypted strings
+
+For secrets like refresh tokens, override `prefCipher` and use `encryptedStringPref`. Values are encrypted with AES-256-GCM before they hit disk, using a key that lives in the Android Keystore. Both helpers work the same way:
+
+```kotlin
+class AuthPrefs(context: Context) : BasePrefsHelper() {
+    override val sharedPreferences =
+        context.getSharedPreferences("auth", Context.MODE_PRIVATE)
+
+    override val prefCipher: PrefCipher = KeystorePrefCipher("my_app_secrets")
+
+    var refreshToken by encryptedStringPref(KEY_REFRESH_TOKEN)
+
+    private companion object {
+        const val KEY_REFRESH_TOKEN = "refresh_token"
+    }
+}
+```
+
+`encryptedStringPref(key, defaultValue)` gives a non-null version. `BasePrefsHelper` also has public `setEncryptedString` / `getEncryptedString`. `BaseDataStoreHelper` has `writeEncryptedString`, `writeEncryptedStringAsync`, `readEncryptedString` (a `Flow`), `readEncryptedStringValue` and `encryptedStringPrefFlow` (which also has a `defaultValue` overload). Assigning `null` removes the key, as with every other type.
+
+Things worth knowing:
+
+- `KeystorePrefCipher` needs minSdk 23. Below that, supply your own `PrefCipher` or guard it with an API check.
+- Use a fixed alias, one per helper. Don't derive it from a class name — R8 renames classes, and a new alias means a new key and every stored value unreadable. Sharing an alias between helpers is a bad idea too: values are bound to their preference key within a file, not across files, so same-named values could be swapped between the two files unnoticed.
+- The preference key is bound into each ciphertext, so copying an encrypted value under a different key in the same file doesn't decrypt. The same goes for renaming a key in an app update: read the value under the old key and rewrite it under the new one, or it reads as `null`.
+- Don't switch an existing plaintext pref to encrypted under the same key (`stringPref(KEY)` to `encryptedStringPref(KEY)`). On DataStore, `Preferences.Key` equality is by name, so the byte-array key finds the old `String` and the first read throws `ClassCastException`. On `BasePrefsHelper` it reads as `null` and the plaintext secret stays in the XML. Use a new key name and migrate: a `DataMigration` (DataStore) or `migrateIfNeeded` (`BasePrefsHelper`) that reads the old key, writes the encrypted one and removes the plaintext.
+- A value that can't be decrypted (wrong or missing key, tampered bytes) is logged and reads as `null` (or your default). It is left in place until the next write replaces it.
+- The key doesn't survive an uninstall or a device restore, so restored values read as `null`. Design for a re-login.
+- If you don't override `prefCipher`, the helper compiles and constructs fine, but the first time a value actually needs encrypting or decrypting it throws `UnsupportedOperationException`. Declaring your delegates before the `prefCipher` override is fine.
+- On DataStore, async writes (`writeEncryptedStringAsync` and the delegate setters) aren't ordered against each other. A non-null write spends time in the Keystore first, so a following `null` write or `clearPrefs()` can land first, and the token comes back after logout. Before clearing a secret, use the suspend `writeEncryptedString`, or join the `Job` from `writeEncryptedStringAsync`. `BasePrefsHelper` doesn't have this problem: it encrypts on the calling thread before the write is queued.
+- `PrefCipher` is a two-method interface, so tests can pass a software AES/GCM implementation — Robolectric has no Keystore.
+
+#### Migrating off `EncryptedSharedPreferences`
+
+The library doesn't depend on `androidx.security:security-crypto` and doesn't need it. If you're moving off it (it's deprecated), read the old values once with your own copy of the dependency, write them through the new API, and clear the old file:
+
+```kotlin
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import com.duck.prefshelper.BasePrefsHelper
+import com.duck.prefshelper.KeystorePrefCipher
+import com.duck.prefshelper.PrefCipher
+
+class AuthPrefs(private val context: Context) : BasePrefsHelper() {
+    override val sharedPreferences =
+        context.getSharedPreferences("auth", Context.MODE_PRIVATE)
+
+    override val prefCipher: PrefCipher = KeystorePrefCipher("my_app_secrets")
+
+    var refreshToken by encryptedStringPref(KEY_REFRESH_TOKEN)
+
+    init {
+        val legacy = context.getSharedPreferences(LEGACY_FILE, Context.MODE_PRIVATE)
+        if (legacy.all.isNotEmpty()) moveFromEncryptedSharedPreferences(legacy)
+    }
+
+    private fun moveFromEncryptedSharedPreferences(legacy: SharedPreferences) {
+        val token = try {
+            val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            EncryptedSharedPreferences.create(
+                context,
+                LEGACY_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            ).getString(KEY_REFRESH_TOKEN, null)
+        } catch (e: Exception) {
+            Log.w("AuthPrefs", "Legacy encrypted prefs are unreadable; dropping them", e)
+            null
+        }
+        if (token != null) {
+            try {
+                setEncryptedString(KEY_REFRESH_TOKEN, token)
+            } catch (e: Exception) {
+                Log.w("AuthPrefs", "Could not re-encrypt the token; retrying next launch", e)
+                return
+            }
+        }
+        legacy.edit().clear().apply()
+    }
+
+    private companion object {
+        const val LEGACY_FILE = "auth_encrypted"
+        const val KEY_REFRESH_TOKEN = "refresh_token"
+    }
+}
+```
+
+There's deliberately no "already migrated" flag. The check is on the raw legacy file, which needs no crypto, and it stops matching once the file is cleared, so `clearPrefs()` at logout can't trigger a second run.
+
+The legacy file is cleared once the token is safely rewritten, or when the old store can't be read. The read side can't tell a permanently broken store (typically a `MasterKey` lost to a backup restore) from a transient Keystore error, and retrying a broken one would cost a failed `EncryptedSharedPreferences.create` on every launch, so any read failure drops the legacy copy and the user signs in again. A failed write is different: the old copy stays and the migration retries on the next launch. Both writes go through `apply()`, which queues disk writes in order, so the legacy copy can't be cleared on disk before the new value lands. The emptied file stays behind; on API 24+ you can remove it with `context.deleteSharedPreferences(LEGACY_FILE)` in a later release.
+
+`EncryptedSharedPreferences` keeps its Tink keysets as entries inside the same named preferences file, so clearing the file removes them. The `MasterKey` itself lives in the Android Keystore under the alias `_androidx_security_master_key_` and is left behind. It's harmless, but if nothing else in your app uses `MasterKey`'s default alias, you can remove it once the migration has run with `KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry("_androidx_security_master_key_")`. Don't do that if another `EncryptedSharedPreferences` or `EncryptedFile` still uses that master key.
+
+Don't use `migrateIfNeeded` for this: on a new file it reads the empty file as a fresh install and stamps it without running your block.
+
+Drop the `security-crypto` dependency once your oldest supported app version has run the migration.
+
 ## Migrating to 2.0
 
 2.0 splits the single `coroutineContext` constructor parameter, which was doing two unrelated jobs, into a `dispatcher` and a `scope`. There is no back-compat shim: deriving a dispatcher back out of an arbitrary `CoroutineContext` is exactly the fragile guesswork this change exists to remove.
