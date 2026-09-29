@@ -287,16 +287,18 @@ class AuthPrefs(context: Context) : BasePrefsHelper() {
 }
 ```
 
-`encryptedStringPref(key, defaultValue)` gives a non-null version. `BasePrefsHelper` also has public `setEncryptedString` / `getEncryptedString`. `BaseDataStoreHelper` has `writeEncryptedString`, `writeEncryptedStringAsync`, `readEncryptedString` (a `Flow`), `readEncryptedStringValue` and `encryptedStringPrefFlow`. Assigning `null` removes the key, as with every other type.
+`encryptedStringPref(key, defaultValue)` gives a non-null version. `BasePrefsHelper` also has public `setEncryptedString` / `getEncryptedString`. `BaseDataStoreHelper` has `writeEncryptedString`, `writeEncryptedStringAsync`, `readEncryptedString` (a `Flow`), `readEncryptedStringValue` and `encryptedStringPrefFlow` (which also has a `defaultValue` overload). Assigning `null` removes the key, as with every other type.
 
 Things worth knowing:
 
 - `KeystorePrefCipher` needs minSdk 23. Below that, supply your own `PrefCipher` or guard it with an API check.
 - Use a fixed alias, one per helper. Don't derive it from a class name — R8 renames classes, and a new alias means a new key and every stored value unreadable. Sharing an alias between helpers is a bad idea too: values are bound to their preference key within a file, not across files, so same-named values could be swapped between the two files unnoticed.
 - The preference key is bound into each ciphertext, so copying an encrypted value under a different key in the same file doesn't decrypt. The same goes for renaming a key in an app update: read the value under the old key and rewrite it under the new one, or it reads as `null`.
+- Don't switch an existing plaintext pref to encrypted under the same key (`stringPref(KEY)` to `encryptedStringPref(KEY)`). On DataStore, `Preferences.Key` equality is by name, so the byte-array key finds the old `String` and the first read throws `ClassCastException`. On `BasePrefsHelper` it reads as `null` and the plaintext secret stays in the XML. Use a new key name and migrate: a `DataMigration` (DataStore) or `migrateIfNeeded` (`BasePrefsHelper`) that reads the old key, writes the encrypted one and removes the plaintext.
 - A value that can't be decrypted (wrong or missing key, tampered bytes) is logged and reads as `null` (or your default). It is left in place until the next write replaces it.
 - The key doesn't survive an uninstall or a device restore, so restored values read as `null`. Design for a re-login.
 - If you don't override `prefCipher`, the helper compiles and constructs fine, but the first time a value actually needs encrypting or decrypting it throws `UnsupportedOperationException`. Declaring your delegates before the `prefCipher` override is fine.
+- On DataStore, async writes (`writeEncryptedStringAsync` and the delegate setters) aren't ordered against each other. A non-null write spends time in the Keystore first, so a following `null` write or `clearPrefs()` can land first, and the token comes back after logout. Before clearing a secret, use the suspend `writeEncryptedString`, or join the `Job` from `writeEncryptedStringAsync`. `BasePrefsHelper` doesn't have this problem: it encrypts on the calling thread before the write is queued.
 - `PrefCipher` is a two-method interface, so tests can pass a software AES/GCM implementation — Robolectric has no Keystore.
 
 #### Migrating off `EncryptedSharedPreferences`

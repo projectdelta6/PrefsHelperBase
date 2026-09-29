@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -595,6 +596,12 @@ abstract class BaseDataStoreHelper(
 	 *
 	 * An encryption failure surfaces in [scope], like any other `*Async` write failure.
 	 *
+	 * Writes launched this way are not ordered against each other. A non-null write spends time in
+	 * the Keystore before it reaches the store, so a later null write (or [clearPrefs]) can land
+	 * first and the earlier value lands after it. Before clearing a secret, e.g. at logout, keep
+	 * the [Job] returned here (delegate setters discard it) and [Job.join] it, or use the suspend
+	 * [writeEncryptedString].
+	 *
 	 * @param key The key to store the value under
 	 * @param value The value to store
 	 * @return The [Job] for the launched write — call [Job.join] to await completion.
@@ -609,11 +616,15 @@ abstract class BaseDataStoreHelper(
 	 * tampered with or written under a different key — is logged and emitted as null. It is left
 	 * in place, and the next write replaces it. Decryption runs on [dispatcher].
 	 *
+	 * The flow only re-emits when this key's stored bytes change, so a failed decrypt isn't
+	 * retried until the value is rewritten.
+	 *
 	 * @param key The key to read the value for
 	 * @return Flow of the value, or null if not present or not decryptable
 	 */
 	protected fun readEncryptedString(key: String): Flow<String?> =
 		readByteArray(key)
+			.distinctUntilChanged { a, b -> a contentEquals b }
 			.map { sealed -> sealed?.let { prefCipher.openStringOrNull(key, it, "BaseDataStoreHelper") } }
 			.flowOn(dispatcher)
 
@@ -1477,6 +1488,13 @@ abstract class BaseDataStoreHelper(
 	 * [Flow] accessor for an encrypted [String] preference — alias for [readEncryptedString].
 	 */
 	protected fun encryptedStringPrefFlow(key: String): Flow<String?> = readEncryptedString(key)
+
+	/**
+	 * [Flow] accessor for an encrypted [String] preference, with [defaultValue] for an absent or
+	 * undecryptable value.
+	 */
+	protected fun encryptedStringPrefFlow(key: String, defaultValue: String): Flow<String> =
+		readEncryptedString(key).map { it ?: defaultValue }
 
 	/**
 	 * Create a property delegate for an [Instant] preference.

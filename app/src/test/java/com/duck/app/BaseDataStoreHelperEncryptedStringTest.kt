@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -31,6 +32,8 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class BaseDataStoreHelperEncryptedStringTest {
@@ -269,6 +272,38 @@ class BaseDataStoreHelperEncryptedStringTest {
 	}
 
 	@Test
+	fun testPrefFlowWithDefaultFollowsWrites() = runBlocking {
+		val helper = newHelper(newDataStore(), SoftwareGcmPrefCipher())
+		val emissions = CopyOnWriteArrayList<String>()
+		val collector = launch(Dispatchers.IO) { helper.testPrefFlow("k", "fallback").collect { emissions += it } }
+		awaitValue({ it == listOf("fallback") }) { emissions.toList() }
+		helper.testWrite("k", "stored")
+		awaitValue({ it == listOf("fallback", "stored") }) { emissions.toList() }
+		helper.testWrite("k", null)
+		awaitValue({ it == listOf("fallback", "stored", "fallback") }) { emissions.toList() }
+		collector.cancel()
+	}
+
+	@Test
+	fun testUnrelatedKeyWritesDoNotTriggerDecrypt() = runBlocking {
+		val cipher = CountingPrefCipher(SoftwareGcmPrefCipher())
+		val helper = newHelper(newDataStore(), cipher)
+		val emissions = CopyOnWriteArrayList<String?>()
+		val collector = launch(Dispatchers.IO) { helper.testReadFlow("k").collect { emissions += it } }
+		awaitValue({ it == listOf(null) }) { emissions.toList() }
+		helper.testWrite("k", "value")
+		awaitValue({ it == listOf(null, "value") }) { emissions.toList() }
+		val decryptsBefore = cipher.decryptCount.get()
+		helper.testWriteString("other", "one")
+		helper.testWriteString("other", "two")
+		helper.testWriteString("other", "three")
+		delay(200)
+		assertEquals(decryptsBefore, cipher.decryptCount.get())
+		assertEquals(listOf(null, "value"), emissions.toList())
+		collector.cancel()
+	}
+
+	@Test
 	fun testEdgeCaseStringsRoundTrip() = runBlocking {
 		val helper = newHelper(newDataStore(), SoftwareGcmPrefCipher())
 		listOf("", "a".repeat(100_000), "😀 \u0000 mixed").forEach { value ->
@@ -290,7 +325,21 @@ class BaseDataStoreHelperEncryptedStringTest {
 		fun testWriteAsync(key: String, value: String?) = writeEncryptedStringAsync(key, value)
 		fun testReadFlow(key: String) = readEncryptedString(key)
 		fun testPrefFlow(key: String) = encryptedStringPrefFlow(key)
+		fun testPrefFlow(key: String, defaultValue: String) = encryptedStringPrefFlow(key, defaultValue)
+		suspend fun testWriteString(key: String, value: String?) = writeString(key, value)
 		fun testReadValue(key: String) = readEncryptedStringValue(key)
+	}
+
+	private class CountingPrefCipher(private val delegate: PrefCipher) : PrefCipher {
+		val decryptCount = AtomicInteger()
+
+		override fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray =
+			delegate.encrypt(plaintext, associatedData)
+
+		override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray {
+			decryptCount.incrementAndGet()
+			return delegate.decrypt(ciphertext, associatedData)
+		}
 	}
 
 	private class DelegatesFirstDataStoreHelper(
