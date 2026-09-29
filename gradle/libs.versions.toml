@@ -1,10 +1,12 @@
 [versions]
+prefsHelperVersion = "2.2.0"
 compileSdk = "37"
 targetSdk = "37"
 gradle = "9.4.1"
 kotlin = "2.4.20"
 dokka = "2.2.0"
 kover = "0.9.10"
+vanniktechPublish = "0.37.0"
 dataStore = "1.2.1"
 coroutines = "1.11.0"
 koin = "4.2.2"
@@ -55,3 +57,4 @@ android-library = { id = "com.android.library", version.ref = "gradle" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
+vanniktech-publish = { id = "com.vanniktech.maven.publish", version.ref = "vanniktechPublish" }

@@ -8,7 +8,7 @@ import java.security.ProviderException
  * Seals preference values before they reach storage, for the `encryptedStringPref` delegates on
  * [BasePrefsHelper] and [BaseDataStoreHelper].
  *
- * [associatedData] is authenticated but not encrypted. The helpers pass the preference key, which
+ * `associatedData` is authenticated but not encrypted. The helpers pass the preference key, which
  * binds each ciphertext to the key it was written under — copying one encrypted value over another
  * in the same file makes it fail to decrypt rather than silently read as the wrong secret.
  *
