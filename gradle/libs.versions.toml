@@ -1,28 +1,28 @@
 [versions]
 compileSdk = "37"
 targetSdk = "37"
-gradle = "9.3.1"
-kotlin = "2.4.10"
+gradle = "9.4.1"
+kotlin = "2.4.20"
 dokka = "2.2.0"
-kover = "0.9.9"
+kover = "0.9.10"
 dataStore = "1.2.1"
 coroutines = "1.11.0"
-koin = "4.1.1"
-mockitoCore = "5.23.0"
-mockitoKotlin = "6.3.0"
+koin = "4.2.2"
+mockitoCore = "5.24.0"
+mockitoKotlin = "6.4.0"
+# Held at 4.16.1: 4.17 fails every sandboxed test here with IllegalAccessException on
+# jdk.internal.access.SharedSecrets (FileDescriptorInterceptor, SDK 36). Retry on the next release.
 robolectric = "4.16.1"
-coreKtx = "1.19.0"
-appcompat = "1.7.1"
+coreKtx = "1.19.1"
 lifecycleRuntime = "2.11.0"
 activityCompose = "1.13.0"
-composeBom = "2026.06.01"
+composeBom = "2026.09.00"
 testExtJunit = "1.3.0"
 espressoCore = "3.7.0"
 junit = "4.13.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
-androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime", version.ref = "lifecycleRuntime" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }

@@ -42,3 +42,4 @@ captures/
 
 # macOS Finder metadata
 .DS_Store
+.kotlin/sessions

@@ -101,3 +101,5 @@ This only reproduces when the delegate is used **from a subclass in another modu
 ## Publishing
 
 Library is published via JitPack. Version tags trigger releases automatically.
+
+Gradle Module Metadata is **disabled** (`GenerateModuleMetadata` off in `PrefsHelper/build.gradle.kts`): JitPack strips the `-sources` classifier from the published `.module`, so consumer IDEs fell back to decompiled classes. Consumers resolve through the POM instead. Don't re-enable it; a local `publishToMavenLocal` producing no `.module` and a `-sources.jar` is the expected output.
