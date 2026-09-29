@@ -105,7 +105,7 @@ Releases go to **Maven Central** as `dev.projectdelta6:prefshelper` via the Vann
 **Credentials are not on disk.** The GPG key and the Sonatype token live in 1Password; the `flexipublish` shell function in `~/.zshrc` exports the five `ORG_GRADLE_PROJECT_*` variables, runs `./publish.sh`, and unsets them. It is repo-agnostic (runs whatever `./publish.sh` is in the current directory), and the token is account-wide, so it works here unchanged:
 
 ```bash
-flexipublish --dry-run   # clean, unit tests, koverVerifyDebug, assembleRelease — no upload
+flexipublish --dry-run   # clean, unit tests, koverVerifyDebug, assembleRelease, signs all 5 artifacts — no upload
 flexipublish             # same gates, then prompts, publishes, tags X.Y.Z and pushes the tag
 ```
 

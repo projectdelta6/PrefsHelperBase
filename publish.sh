@@ -32,8 +32,9 @@ for arg in "$@"; do
             ;;
         -h|--help)
             echo "Usage: $0 [--dry-run|-n]"
-            echo "  --dry-run, -n   Run every step (checks, clean, tests, coverage gate)"
-            echo "                  EXCEPT the actual Maven Central publish."
+            echo "  --dry-run, -n   Run every step (checks, clean, tests, coverage gate,"
+            echo "                  signing every artifact) EXCEPT the Maven Central upload."
+            echo "                  Needs the signing key; the upload token is optional."
             exit 0
             ;;
         *)
@@ -49,7 +50,7 @@ VERSION=$(grep 'prefsHelperVersion' gradle/libs.versions.toml | sed 's/.*= *"\(.
 echo_info "PrefsHelper version: $VERSION"
 
 if [[ "$DRY_RUN" == true ]]; then
-    echo_warn "DRY RUN — running all checks, tests and the coverage gate, but NOT publishing."
+    echo_warn "DRY RUN — running all checks, tests, the coverage gate and signing, but NOT uploading."
 fi
 
 # Check for uncommitted changes
@@ -128,18 +129,18 @@ if [[ "$HAS_PASSWORD" == false ]]; then
     MISSING_CREDS=true
 fi
 
+# Signing is required in dry-run too: the dry run signs every artifact, because
+# signing is the one step a real release cannot survive failing. Only the upload
+# token is optional in dry-run, since nothing is uploaded.
+MISSING_SIGNING=false
 if [[ "$HAS_SIGNING" == false ]]; then
-    if [[ "$DRY_RUN" == true ]]; then
-        echo_warn "No signing configuration found — ignored in dry-run (a real publish would fail here)."
-    else
-        echo_error "No signing configuration found. Maven Central rejects unsigned artifacts."
-        MISSING_CREDS=true
-    fi
+    echo_error "No signing configuration found. Maven Central rejects unsigned artifacts."
+    MISSING_SIGNING=true
 fi
 
-if [[ "$MISSING_CREDS" == true ]]; then
-    if [[ "$DRY_RUN" == true ]]; then
-        echo_warn "Missing publish credentials — ignored in dry-run (a real publish would fail here)."
+if [[ "$MISSING_CREDS" == true || "$MISSING_SIGNING" == true ]]; then
+    if [[ "$DRY_RUN" == true && "$MISSING_SIGNING" == false ]]; then
+        echo_warn "Missing upload credentials — ignored in dry-run (a real publish would fail here)."
     else
         echo ""
         echo "Credentials live in 1Password, not on disk. Publish with:"
@@ -184,6 +185,34 @@ if ! ./gradlew :app:testDebugUnitTest :app:koverVerifyDebug :app:assembleRelease
 fi
 echo_info "All tests passed and the coverage gate is satisfied."
 
+# In dry-run, sign every artifact without installing or uploading anything, so a
+# bad key, wrong key ID or wrong passphrase fails here rather than mid-release.
+# signMavenPublication writes the .asc files into PrefsHelper/build only.
+if [[ "$DRY_RUN" == true ]]; then
+    echo_info "Signing all publication artifacts (nothing is installed or uploaded)..."
+    if ! ./gradlew :PrefsHelper:signMavenPublication --no-configuration-cache; then
+        echo_error "Signing failed. Check the key, key ID and passphrase."
+        exit 1
+    fi
+    # aar, sources jar, javadoc jar, POM and Gradle module metadata.
+    EXPECTED_SIGNATURES=5
+    SIGNATURES=()
+    while IFS= read -r asc; do
+        if [[ "$(head -n 1 "$asc")" != "-----BEGIN PGP SIGNATURE-----" ]]; then
+            echo_error "Not an armored PGP signature: $asc"
+            exit 1
+        fi
+        SIGNATURES+=("$asc")
+    done < <(find PrefsHelper/build -name '*.asc' -type f | sort)
+    if (( ${#SIGNATURES[@]} < EXPECTED_SIGNATURES )); then
+        echo_error "Expected at least $EXPECTED_SIGNATURES signatures, found ${#SIGNATURES[@]}:"
+        printf '  %s\n' "${SIGNATURES[@]}"
+        exit 1
+    fi
+    echo_info "Signed ${#SIGNATURES[@]} artifacts:"
+    printf '  %s\n' "${SIGNATURES[@]}"
+fi
+
 # In dry-run, stop here — everything except the actual publish has run.
 if [[ "$DRY_RUN" == true ]]; then
     echo ""
@@ -191,7 +220,7 @@ if [[ "$DRY_RUN" == true ]]; then
     echo_info "  DRY RUN complete for PrefsHelper v$VERSION"
     echo_info "================================================"
     echo ""
-    echo_info "All pre-publish checks, tests and the coverage gate passed."
+    echo_info "All pre-publish checks, tests, the coverage gate and signing passed."
     echo_info "Skipped: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache"
     echo_info "Re-run without --dry-run to publish for real."
     exit 0
