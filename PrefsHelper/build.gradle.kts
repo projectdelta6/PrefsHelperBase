@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import org.gradle.api.publish.tasks.GenerateModuleMetadata
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -57,9 +58,16 @@ afterEvaluate {
 	}
 }
 
+// JitPack strips the -sources classifier from published Gradle Module Metadata, so Gradle asks for
+// a file that does not exist and IDEs fall back to decompiled classes. Without a .module, resolution
+// goes through the POM, where sources are found by classifier convention. Verified in
+// AppolyDroid-Toolbox 1.8.2.
+tasks.withType<GenerateModuleMetadata>().configureEach {
+	enabled = false
+}
+
 dependencies {
 	implementation(libs.androidx.core.ktx)
-	implementation(libs.androidx.appcompat)
 
 	api(libs.androidx.dataStore)
 

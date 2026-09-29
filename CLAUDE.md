@@ -15,8 +15,8 @@ LocalDateTime, LocalDate, LocalTime, and Enums.
 # Build the library
 ./gradlew :PrefsHelper:build
 
-# Run all tests (all three test classes live in :app/src/test and run on the JVM —
-# BaseDataStoreHelperTest runs under Robolectric, so no device/emulator is needed)
+# Run all JVM unit tests (the seven classes in :app/src/test; Robolectric where needed —
+# no device/emulator needed)
 ./gradlew :app:testDebugUnitTest
 
 # Run a single test class
@@ -70,6 +70,7 @@ Both classes support the same types as of 2.0: `String`, `Int`, `Long`, `Float`,
 Storage conventions still differ by backend, and deliberately so:
 - **`Double` on `BasePrefsHelper`** is stored as raw IEEE-754 bits via `putLong`/`Double.fromBits`, because `SharedPreferences` has no double primitive. Reading that key with `getLong` returns the bit pattern, not the number.
 - **`ByteArray` on `BasePrefsHelper`** is Base64 (`NO_WRAP`) in a String, since SharedPreferences has no binary type. Undecodable data logs and returns null rather than throwing.
+- **Encrypted strings** (`encryptedStringPref`, both helpers) go through a `PrefCipher` (`protected open val prefCipher`, default throws `UnsupportedOperationException`); `KeystorePrefCipher` is the AES-256-GCM AndroidKeyStore implementation. The pref key is passed as GCM associated data, so a ciphertext copied to another key fails to decrypt. On `BasePrefsHelper` the sealed bytes are stored exactly like `ByteArray` (`setByteArray`, Base64 `NO_WRAP` string); on `BaseDataStoreHelper` they sit under a `byteArrayPreferencesKey`. `GeneralSecurityException`/`ProviderException` on decrypt is logged and reads as null. The library doesn't depend on `security-crypto`.
 - **`Set<String>` on `BasePrefsHelper`** copies on both read and write. `SharedPreferences.getStringSet` documents its result as one callers must not modify, and the platform keeps a reference to the set it is handed — both directions are trapped, so both are copied.
 - **Null semantics are identical on both helpers** as of 2.0: assigning null removes the key, an absent key reads as null. The `-1L` temporal sentinel `BasePrefsHelper` used before 2.0 is gone — it made `LocalDate` 1969-12-31 (epoch day -1) unstorable. `migrateLegacyTemporalSentinels(vararg keys)` sweeps stale sentinels left by 1.x; `getLocalTime` also treats out-of-range values as null, since `LocalTime.ofSecondOfDay(-1)` throws.
 - **`Set<Enum>`** is stored as a set of `Enum.name` on both. Unknown names are dropped on read so deleting an enum constant doesn't break existing installs.
@@ -88,7 +89,9 @@ This only reproduces when the delegate is used **from a subclass in another modu
 
 - **R8 verification is manual and needs a device**: `app/src/androidTest/R8SurvivalTest.kt` is the only test that can check the README's "no consumer ProGuard rules" claim, since unit tests never run R8 and Robolectric runs unminified code. It only means anything with `-PminifiedTests`, which flips `testBuildType` to the minified release build; its first test asserts at runtime that classes really were renamed so a debug run can't pass vacuously. Harness keeps live in `proguard-rules-instrumentation.pro`, applied **only** under that flag — keep them out of `proguard-rules.pro`, or a plain `assembleRelease` stops being evidence that consumers need no rules.
 
-- **Tests are JVM-only (Robolectric), not instrumented**: all *unit* test classes live in `app/src/test` (`BasePrefsHelperTest`, `BaseDataStoreHelperTest`, and `BaseDataStoreHelperInjectionTest`). `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
+- **Tests are JVM-only (Robolectric), not instrumented**: all *unit* test classes live in `app/src/test` (`BasePrefsHelperTest`, `BasePrefsHelperRealPrefsTest`, `BasePrefsHelperEncryptedStringTest`, `BaseDataStoreHelperTest`, `BaseDataStoreHelperInjectionTest`, `BaseDataStoreHelperEncryptedStringTest`, and `di/PrefsModuleTest`). `BaseDataStoreHelperTest` uses a real `DataStore` but runs on the JVM via Robolectric (`@RunWith(AndroidJUnit4::class)` delegates to `RobolectricTestRunner` off-device). This is deliberate: **Kover cannot instrument on-device tests**, so DataStore coverage would read ~0% if the tests were instrumented — running them under Robolectric makes the `koverVerifyDebug` floor meaningful across both helpers. Robolectric's SDK is pinned to 36 in `app/src/test/resources/robolectric.properties` because `targetSdk = 37` has no Robolectric image yet.
+
+- **`KeystorePrefCipher` can't run under Robolectric**: there is no AndroidKeyStore provider on the JVM, so it is not unit-tested. Encrypted-string tests use `SoftwareGcmPrefCipher` (`app/src/test`), real AES/GCM with an in-memory key, which still exercises AAD binding. `app/src/androidTest/KeystorePrefCipherTest.kt` covers it on a real device (round trip, AAD, tampering, no-key decrypt, stale-cache recovery after another instance's `deleteKey()`, non-AES entry). Like `R8SurvivalTest` it is manual and needs a device, so it is not in CI: `./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.duck.app.KeystorePrefCipherTest`. The `encryptedStringPref` factories are non-inline, so the cross-module `protected` gotcha above does not apply to them.
 
 ## Project Structure
 
@@ -98,3 +101,5 @@ This only reproduces when the delegate is used **from a subclass in another modu
 ## Publishing
 
 Library is published via JitPack. Version tags trigger releases automatically.
+
+Gradle Module Metadata is **disabled** (`GenerateModuleMetadata` off in `PrefsHelper/build.gradle.kts`): JitPack strips the `-sources` classifier from the published `.module`, so consumer IDEs fell back to decompiled classes. Consumers resolve through the POM instead. Don't re-enable it; a local `publishToMavenLocal` producing no `.module` and a `-sources.jar` is the expected output.

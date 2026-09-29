@@ -46,6 +46,18 @@ abstract class BasePrefsHelper(
 	protected abstract val sharedPreferences: SharedPreferences
 
 	/**
+	 * The [PrefCipher] behind [encryptedStringPref], [setEncryptedString] and [getEncryptedString].
+	 *
+	 * Override it to use encrypted preferences, normally with a [KeystorePrefCipher]. Delegates read
+	 * it on each access rather than capturing it, so they can be declared before the override; an
+	 * encrypted read in the subclass's own `init` still needs the override assigned first. The
+	 * default throws the first time a value actually needs encrypting or decrypting. Back it with one
+	 * stored instance, not a getter that builds a new cipher on every access.
+	 */
+	protected open val prefCipher: PrefCipher
+		get() = throw UnsupportedOperationException("Override prefCipher to use encrypted preferences")
+
+	/**
 	 * Clear all preferences.
 	 *
 	 * The [KEY_HELPER_VERSION] stamp written by [migrateIfNeeded] is deliberately preserved: it is
@@ -428,6 +440,34 @@ abstract class BasePrefsHelper(
 	}
 
 	/**
+	 * Set a [String] preference, encrypted with [prefCipher]
+	 *
+	 * The ciphertext is stored the same way as [setByteArray]. Encryption runs on the calling
+	 * thread. Assigning null removes the key.
+	 *
+	 * @param key The key to store the value under
+	 * @param value The value to store, or null to remove the key
+	 */
+	fun setEncryptedString(key: String, value: String?) {
+		setByteArray(key, value?.let { prefCipher.sealString(key, it) })
+	}
+
+	/**
+	 * Get a [String] preference written by [setEncryptedString]
+	 *
+	 * A value that can't be decrypted — its Keystore key is gone, or the stored bytes were
+	 * tampered with or written under a different key — is logged and read as null. It is left in
+	 * place, and the next write replaces it.
+	 *
+	 * @param key The key to get the value for
+	 * @return The decrypted value, or null if the key is absent or can't be decrypted
+	 */
+	fun getEncryptedString(key: String): String? {
+		val sealed = getByteArray(key) ?: return null
+		return prefCipher.openStringOrNull(key, sealed, "BasePrefsHelper")
+	}
+
+	/**
 	 * Set a [Boolean] preference
 	 *
 	 * @param key The key to store the value under
@@ -762,6 +802,30 @@ abstract class BasePrefsHelper(
 		object : ReadWriteProperty<Any?, ByteArray?> {
 			override fun getValue(thisRef: Any?, property: KProperty<*>): ByteArray? = getByteArray(key)
 			override fun setValue(thisRef: Any?, property: KProperty<*>, value: ByteArray?) = setByteArray(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a nullable [String] preference encrypted with [prefCipher].
+	 *
+	 * Returns null when the key is absent or can't be decrypted. Assigning null removes the key.
+	 * See [getEncryptedString] for how undecryptable values are handled.
+	 */
+	protected fun encryptedStringPref(key: String): ReadWriteProperty<Any?, String?> =
+		object : ReadWriteProperty<Any?, String?> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): String? = getEncryptedString(key)
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: String?) = setEncryptedString(key, value)
+		}
+
+	/**
+	 * Create a property delegate for a [String] preference encrypted with [prefCipher].
+	 *
+	 * @param key The key to read/write the value for
+	 * @param defaultValue Value returned if the key is absent or can't be decrypted
+	 */
+	protected fun encryptedStringPref(key: String, defaultValue: String): ReadWriteProperty<Any?, String> =
+		object : ReadWriteProperty<Any?, String> {
+			override fun getValue(thisRef: Any?, property: KProperty<*>): String = getEncryptedString(key) ?: defaultValue
+			override fun setValue(thisRef: Any?, property: KProperty<*>, value: String) = setEncryptedString(key, value)
 		}
 
 	/**
