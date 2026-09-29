@@ -2,27 +2,19 @@
 
 Android library providing type-safe base classes for `SharedPreferences` and Jetpack `DataStore<Preferences>`.
 
-[![Release](https://jitpack.io/v/projectdelta6/PrefsHelperBase.svg)](https://jitpack.io/#projectdelta6/PrefsHelperBase)
+[![Maven Central](https://img.shields.io/maven-central/v/dev.projectdelta6/prefshelper)](https://central.sonatype.com/artifact/dev.projectdelta6/prefshelper)
 
 ## Install
 
-Add JitPack to your root `settings.gradle.kts` (or `build.gradle`):
-
-```kotlin
-dependencyResolutionManagement {
-    repositories {
-        maven { url = uri("https://jitpack.io") }
-    }
-}
-```
-
-Then in your module:
+Published to Maven Central, so no extra repository is needed beyond `mavenCentral()`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.projectdelta6:PrefsHelperBase:<version>")
+    implementation("dev.projectdelta6:prefshelper:<version>")
 }
 ```
+
+Versions up to and including 2.1.0 were published through JitPack as `com.github.projectdelta6:PrefsHelperBase`, and those stay available there. Moving to Maven Central only changes the dependency line: the Kotlin package is still `com.duck.prefshelper`, so no imports change.
 
 `minSdk 21`. `datastore-preferences` is exposed as an `api` dependency, so `DataStore<Preferences>` is visible to you without declaring it yourself.
 

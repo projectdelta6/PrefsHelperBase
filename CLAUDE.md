@@ -95,11 +95,22 @@ This only reproduces when the delegate is used **from a subclass in another modu
 
 ## Project Structure
 
-- `PrefsHelper/` - Library module (published to JitPack)
+- `PrefsHelper/` - Library module (published to Maven Central as `dev.projectdelta6:prefshelper`)
 - `app/` - Sample/test application module
 
 ## Publishing
 
-Library is published via JitPack. Version tags trigger releases automatically.
+Releases go to **Maven Central** as `dev.projectdelta6:prefshelper` via the Vanniktech Maven Publish plugin, driven by `publish.sh` (ported from FlexiLogger). The version lives in `prefsHelperVersion` in `gradle/libs.versions.toml`. The `dev.projectdelta6` namespace is the reversed `projectdelta6.dev` domain, verified in the Central Portal with a DNS TXT record (Cloudflare).
 
-Gradle Module Metadata is **disabled** (`GenerateModuleMetadata` off in `PrefsHelper/build.gradle.kts`): JitPack strips the `-sources` classifier from the published `.module`, so consumer IDEs fell back to decompiled classes. Consumers resolve through the POM instead. Don't re-enable it; a local `publishToMavenLocal` producing no `.module` and a `-sources.jar` is the expected output.
+**Credentials are not on disk.** The GPG key and the Sonatype token live in 1Password; the `flexipublish` shell function in `~/.zshrc` exports the five `ORG_GRADLE_PROJECT_*` variables, runs `./publish.sh`, and unsets them. It is repo-agnostic (runs whatever `./publish.sh` is in the current directory), and the token is account-wide, so it works here unchanged:
+
+```bash
+flexipublish --dry-run   # clean, unit tests, koverVerifyDebug, assembleRelease — no upload
+flexipublish             # same gates, then prompts, publishes, tags X.Y.Z and pushes the tag
+```
+
+Tags stay plain `X.Y.Z` (no `v`), matching every tag since 1.x.
+
+A bare `publishToMavenLocal` fails with "No configured signatory" — `signAllPublications()` has no key without those variables. That is expected, not a build bug.
+
+**History:** up to 2.1.0 the library went out through JitPack as `com.github.projectdelta6:PrefsHelperBase` (old tags still build there). JitPack stripped the `-sources` classifier from Gradle Module Metadata, so 2.1.0 shipped with metadata disabled. On Central the `.module` is published as-is and names `prefshelper-X.Y.Z-sources.jar` correctly — don't reintroduce the `GenerateModuleMetadata` workaround.

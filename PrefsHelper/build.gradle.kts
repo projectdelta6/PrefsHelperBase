@@ -1,15 +1,15 @@
 import com.android.build.api.dsl.LibraryExtension
-import org.gradle.api.publish.tasks.GenerateModuleMetadata
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
 	alias(libs.plugins.android.library)
 	alias(libs.plugins.dokka)
 	alias(libs.plugins.kover)
-	`maven-publish`
+	alias(libs.plugins.vanniktech.publish)
 }
-
-group = "com.github.projectdelta6"
 
 configure<LibraryExtension> {
 	namespace = "com.duck.prefshelper"
@@ -34,12 +34,6 @@ configure<LibraryExtension> {
 		targetCompatibility = JavaVersion.VERSION_11
 	}
 
-	publishing {
-		singleVariant("release") {
-			withSourcesJar()
-			withJavadocJar()
-		}
-	}
 }
 
 kotlin {
@@ -48,22 +42,46 @@ kotlin {
 	}
 }
 
-afterEvaluate {
-	publishing {
-		publications {
-			register<MavenPublication>("release") {
-				from(components["release"])
+mavenPublishing {
+	configure(
+		AndroidSingleVariantLibrary(
+			javadocJar = JavadocJar.Dokka("dokkaGeneratePublicationHtml"),
+			sourcesJar = SourcesJar.Sources(),
+			variant = "release",
+		),
+	)
+	publishToMavenCentral()
+	signAllPublications()
+
+	coordinates("dev.projectdelta6", "prefshelper", libs.versions.prefsHelperVersion.get())
+
+	pom {
+		name.set("PrefsHelper")
+		description.set("Type-safe base classes for Android SharedPreferences and Jetpack DataStore<Preferences>, with Keystore-backed encrypted strings.")
+		url.set("https://github.com/projectdelta6/PrefsHelperBase")
+		inceptionYear.set("2023")
+
+		licenses {
+			license {
+				name.set("GNU General Public License v3.0")
+				url.set("https://www.gnu.org/licenses/gpl-3.0.html")
 			}
 		}
-	}
-}
 
-// JitPack strips the -sources classifier from published Gradle Module Metadata, so Gradle asks for
-// a file that does not exist and IDEs fall back to decompiled classes. Without a .module, resolution
-// goes through the POM, where sources are found by classifier convention. Verified in
-// AppolyDroid-Toolbox 1.8.2.
-tasks.withType<GenerateModuleMetadata>().configureEach {
-	enabled = false
+		developers {
+			developer {
+				id.set("projectdelta6")
+				name.set("Bradley Duck")
+				email.set("projectdelta6@gmail.com")
+			}
+		}
+
+		scm {
+			url.set("https://github.com/projectdelta6/PrefsHelperBase")
+			connection.set("scm:git:git://github.com/projectdelta6/PrefsHelperBase.git")
+			developerConnection.set("scm:git:ssh://git@github.com/projectdelta6/PrefsHelperBase.git")
+		}
+	}
 }
 
 dependencies {
